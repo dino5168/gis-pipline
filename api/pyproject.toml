@@ -1,0 +1,13 @@
+[project]
+name = "utl-api"
+version = "0.1.0"
+description = "台北市公共管線 API（3D 資料、查詢、統計）"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "psycopg[binary,pool]>=3.2",
+]
+
+[tool.uv]
+package = false

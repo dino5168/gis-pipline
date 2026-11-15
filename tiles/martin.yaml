@@ -1,0 +1,48 @@
+# Martin 向量圖磚服務設定
+# 啟動：.\start-martin.ps1（會從 pgpass.conf 讀取密碼並設定環境變數 MARTIN_PG_URL）
+#
+# 圖磚網址：
+#   TileJSON  http://127.0.0.1:3000/utl_pipe
+#   圖磚      http://127.0.0.1:3000/utl_pipe/{z}/{x}/{y}
+#   目錄      http://127.0.0.1:3000/catalog
+
+listen_addresses: '127.0.0.1:3000'
+
+postgres:
+  connection_string: ${MARTIN_PG_URL}
+  # 只發布下面明確列出的資料表
+  auto_publish: false
+  tables:
+    utl_pipe:
+      schema: public
+      table: utl_pipe
+      srid: 3826            # 資料表座標系統，Martin 會即時轉成 EPSG:3857
+      geometry_column: geom
+      geometry_type: LINESTRING
+      id_column: gid        # 作為圖徵 id（前端 hover / 點選使用）
+      minzoom: 12           # 太小比例尺一張圖磚會塞進數萬條管線，不輸出
+      maxzoom: 22
+      extent: 4096
+      buffer: 64
+      clip_geom: true
+      properties:
+        feat_id: text
+        class_code: text
+        start_no: text
+        end_no: text
+        mgmt_unit: text
+        op_type: int4
+        set_date: date
+        pipe_no: text
+        size_unit: int4
+        dia_width: float8
+        dia_height: float8
+        pipe_count: int4
+        material: text
+        start_dep: float8
+        end_dep: float8
+        pipe_len: float8
+        pipe_type: int4
+        use_stat: int4
+        data_stat: int4
+        remark: text

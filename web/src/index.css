@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+/* 色彩 token：淺色預設，系統深色模式時切換 */
+@theme {
+  --color-muted: #656d76;
+  --font-sans: system-ui, 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
+}
+
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #656d76;
+  --border: #d0d7de;
+  --panel: rgb(255 255 255 / 0.94);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #8d96a0;
+    --border: #30363d;
+    --panel: rgb(22 27 34 / 0.94);
+  }
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+
+@layer components {
+  .text-muted {
+    color: var(--muted);
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+  .section-title {
+    @apply mt-3 mb-1.5 flex items-center gap-1 text-xs font-semibold;
+    color: var(--muted);
+  }
+  .field {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    @apply rounded;
+  }
+  .btn {
+    @apply cursor-pointer rounded px-2 py-0.5 text-xs;
+    background: none;
+    color: inherit;
+    border: 1px solid var(--border);
+  }
+}
+
+/* MapLibre 彈出視窗固定淺色底 */
+.maplibregl-popup-content {
+  padding: 10px 12px;
+  max-height: 60vh;
+  overflow: auto;
+}
