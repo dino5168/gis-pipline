@@ -16,3 +16,12 @@ export const PIPES_CENTER: [number, number] = [121.5654, 25.0412];
 
 /** 資料範圍（台北市）[west, south, east, north] */
 export const DATA_BOUNDS: [number, number, number, number] = [121.464, 24.966, 121.626, 25.152];
+
+/** 3D 管線：縮放等級達此值才向 API 載入（太小範圍內管線過多） */
+export const PIPE3D_MIN_ZOOM = 16;
+/** 3D 管線：單次最多載入筆數（API 依離畫面中心距離排序） */
+export const PIPE3D_LIMIT = 5000;
+/** 3D 管線：埋深超過此值視為異常資料，以此值顯示（約 235 筆 > 30m） */
+export const PIPE3D_MAX_DEPTH = 30;
+/** 進入 3D 檢視時的地圖傾斜角度 */
+export const PIPE3D_PITCH = 60;

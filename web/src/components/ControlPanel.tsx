@@ -2,6 +2,8 @@ import { Layers, Map as MapIcon, TriangleAlert, ZoomIn } from 'lucide-react';
 import { BASEMAPS, BASEMAP_IDS, type BasemapId } from '../map/basemaps';
 import { PIPE_MIN_ZOOM } from '../config';
 import { MaterialLegend } from './MaterialLegend';
+import { Pipe3DControls } from './Pipe3DControls';
+import type { HeightMode, Pipe3DStatus } from '../types/pipe3d';
 
 interface Props {
   basemap: BasemapId;
@@ -11,6 +13,13 @@ interface Props {
   zoom: number | null;
   tileError: string | null;
   onZoomToPipes: () => void;
+  view3d: boolean;
+  onView3dChange: (on: boolean) => void;
+  heightMode: HeightMode;
+  onHeightModeChange: (m: HeightMode) => void;
+  exaggeration: number;
+  onExaggerationChange: (k: number) => void;
+  pipe3dStatus: Pipe3DStatus;
 }
 
 export function ControlPanel(p: Props) {
@@ -40,6 +49,16 @@ export function ControlPanel(p: Props) {
         <Layers size={13} /> 管線材料
       </h2>
       <MaterialLegend enabled={p.enabledMaterials} onChange={p.onMaterialsChange} />
+
+      <Pipe3DControls
+        view3d={p.view3d}
+        onView3dChange={p.onView3dChange}
+        heightMode={p.heightMode}
+        onHeightModeChange={p.onHeightModeChange}
+        exaggeration={p.exaggeration}
+        onExaggerationChange={p.onExaggerationChange}
+        status={p.pipe3dStatus}
+      />
 
       {p.zoom !== null && <div className="text-muted mt-2.5">縮放等級 {p.zoom.toFixed(1)}</div>}
 

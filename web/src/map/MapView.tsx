@@ -7,6 +7,9 @@ import {
   type SourceSpecification,
 } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+// MapLibre 6 預設從主程式旁邊載入 worker，但 Vite 會把主程式預先打包到 .vite/deps，
+// 那裡沒有 worker 檔 → 地圖整張不畫。改成明確指定 worker 位址。
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { PIPE_SOURCE_LAYER, PIPE_TILEJSON, TAIPEI_CENTER } from '../config';
 import { BASEMAPS, BASEMAP_IDS, basemapLayerId, type BasemapId } from './basemaps';
 import {
@@ -18,6 +21,10 @@ import {
 } from './pipeStyle';
 import { PipeAttributeTable } from '../components/PipeAttributeTable';
 import type { PipeProperties } from '../types/pipe';
+import type { Pipe3DOptions, Pipe3DStatus } from '../types/pipe3d';
+import { usePipe3D } from './usePipe3D';
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 interface Props {
   basemap: BasemapId;
@@ -26,6 +33,9 @@ interface Props {
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
   onTileError: (message: string) => void;
+  view3d: boolean;
+  pipe3dOptions: Pipe3DOptions;
+  onPipe3DStatus: (status: Pipe3DStatus) => void;
 }
 
 interface Selection {
@@ -61,7 +71,16 @@ function buildStyle(initialBasemap: BasemapId): maplibregl.StyleSpecification {
   return { version: 8, sources, layers };
 }
 
-export function MapView({ basemap, enabledMaterials, mapRef, onZoomChange, onTileError }: Props) {
+export function MapView({
+  basemap,
+  enabledMaterials,
+  mapRef,
+  onZoomChange,
+  onTileError,
+  view3d,
+  pipe3dOptions,
+  onPipe3DStatus,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [popupNode] = useState(() => document.createElement('div'));
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -136,6 +155,9 @@ export function MapView({ basemap, enabledMaterials, mapRef, onZoomChange, onTil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---- 3D 管線（必須放在建立地圖的 effect 之後）
+  usePipe3D(mapRef, view3d, pipe3dOptions, onPipe3DStatus);
+
   // ---- 底圖切換
   useEffect(() => {
     const map = mapRef.current;
@@ -165,7 +187,9 @@ export function MapView({ basemap, enabledMaterials, mapRef, onZoomChange, onTil
 
   return (
     <>
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* 不能用 absolute inset-0：maplibre-gl.css 的 .maplibregl-map{position:relative} 未分層，
+          會蓋過 Tailwind 4（在 @layer 內）的 absolute，容器高度變 0 */}
+      <div ref={containerRef} className="h-full w-full" />
       {selection &&
         createPortal(<PipeAttributeTable id={selection.id} props={selection.props} />, popupNode)}
     </>

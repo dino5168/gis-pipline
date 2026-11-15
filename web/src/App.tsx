@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type * as maplibregl from 'maplibre-gl';
 import { MapView } from './map/MapView';
 import { ControlPanel } from './components/ControlPanel';
 import { ALL_MATERIAL_CODES } from './map/pipeStyle';
 import type { BasemapId } from './map/basemaps';
 import { DATA_BOUNDS, PIPES_CENTER } from './config';
+import type { HeightMode, Pipe3DStatus } from './types/pipe3d';
 
 export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -14,6 +15,11 @@ export default function App() {
   );
   const [zoom, setZoom] = useState<number | null>(null);
   const [tileError, setTileError] = useState<string | null>(null);
+  const [view3d, setView3d] = useState(false);
+  const [heightMode, setHeightMode] = useState<HeightMode>('depth-top');
+  const [exaggeration, setExaggeration] = useState(5);
+  const [pipe3dStatus, setPipe3dStatus] = useState<Pipe3DStatus>({ kind: 'off' });
+  const pipe3dOptions = useMemo(() => ({ heightMode, exaggeration }), [heightMode, exaggeration]);
 
   // 畫面中心在資料範圍內就原地放大，否則飛到台北市中心
   const zoomToPipes = useCallback(() => {
@@ -33,6 +39,9 @@ export default function App() {
         mapRef={mapRef}
         onZoomChange={setZoom}
         onTileError={setTileError}
+        view3d={view3d}
+        pipe3dOptions={pipe3dOptions}
+        onPipe3DStatus={setPipe3dStatus}
       />
       <ControlPanel
         basemap={basemap}
@@ -42,6 +51,13 @@ export default function App() {
         zoom={zoom}
         tileError={tileError}
         onZoomToPipes={zoomToPipes}
+        view3d={view3d}
+        onView3dChange={setView3d}
+        heightMode={heightMode}
+        onHeightModeChange={setHeightMode}
+        exaggeration={exaggeration}
+        onExaggerationChange={setExaggeration}
+        pipe3dStatus={pipe3dStatus}
       />
     </div>
   );
