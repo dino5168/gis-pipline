@@ -15,7 +15,7 @@ export function formatCoord(s: CoordDisplaySettings, lng: number, lat: number): 
 /** 滑鼠所在位置的坐標（地圖區右下角；滑鼠不在圖面上時隱藏） */
 export function CoordinateDisplay({ settings }: { settings: CoordDisplaySettings }) {
   const p = usePointerLngLat();
-  if (!p) return null;
+  if (!p || !settings.visible) return null;
   const [a, b] = formatCoord(settings, p.lng, p.lat);
   const label = COORD_SYSTEMS.find((s) => s.id === settings.system)?.label ?? '';
   return (

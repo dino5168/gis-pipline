@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { formatCoord } from './CoordinateDisplay';
+import { NumberStepper } from './NumberStepper';
 import {
   COORD_SYSTEMS,
   LNGLAT_DECIMALS_RANGE,
@@ -19,7 +20,7 @@ import {
 } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 
 interface Props {
   open: boolean;
@@ -40,10 +41,8 @@ export function CoordSettingsDrawer({ open, onOpenChange, settings, onChange }: 
 
   const decimals = (label: string, key: 'lngLatDecimals' | 'xDecimals' | 'yDecimals', range: { min: number; max: number }) => (
     <div className="space-y-2">
-      <Label className={SECTION_LABEL}>
-        {label} {settings[key]} 位
-      </Label>
-      <Slider min={range.min} max={range.max} step={1} value={[settings[key]]} onValueChange={([v]) => set(key, v)} />
+      <Label className={SECTION_LABEL}>{label}</Label>
+      <NumberStepper label={label} min={range.min} max={range.max} value={settings[key]} onChange={(v) => set(key, v)} />
     </div>
   );
 
@@ -63,6 +62,11 @@ export function CoordSettingsDrawer({ open, onOpenChange, settings, onChange }: 
         </DrawerHeader>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="coord-visible">顯示坐標</Label>
+            <Switch id="coord-visible" checked={settings.visible} onCheckedChange={(v) => set('visible', v)} />
+          </div>
+
           <div className="space-y-2">
             <Label className={SECTION_LABEL}>坐標系</Label>
             <RadioGroup value={settings.system} onValueChange={(v) => set('system', v as CoordSystem)}>

@@ -13,6 +13,8 @@ export function isCoordSystem(v: unknown): v is CoordSystem {
 
 /** 設定 → 坐標系 */
 export interface CoordDisplaySettings {
+  /** 是否在地圖區右下角顯示坐標 */
+  visible: boolean;
   system: CoordSystem;
   /** 經緯度的小數位數 */
   lngLatDecimals: number;
@@ -26,6 +28,7 @@ export const LNGLAT_DECIMALS_RANGE = { min: 0, max: 8 } as const;
 export const XY_DECIMALS_RANGE = { min: 0, max: 6 } as const;
 
 export const DEFAULT_COORD_DISPLAY: CoordDisplaySettings = {
+  visible: true,
   system: 'twd97',
   lngLatDecimals: 6,
   xDecimals: 4,

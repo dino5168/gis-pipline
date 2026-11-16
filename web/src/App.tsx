@@ -71,6 +71,7 @@ function loadCoordDisplay(): CoordDisplaySettings {
   try {
     const v = JSON.parse(localStorage.getItem(COORD_STORE_KEY) ?? '{}') as Partial<CoordDisplaySettings>;
     return {
+      visible: typeof v.visible === 'boolean' ? v.visible : d.visible,
       system: isCoordSystem(v.system) ? v.system : d.system,
       lngLatDecimals: int(v.lngLatDecimals, LNGLAT_DECIMALS_RANGE, d.lngLatDecimals),
       xDecimals: int(v.xDecimals, XY_DECIMALS_RANGE, d.xDecimals),
