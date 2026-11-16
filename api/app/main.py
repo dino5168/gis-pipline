@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import pool
@@ -79,20 +79,30 @@ def pipes_3d(
     if e - w > PIPES3D_MAX_SPAN or n - s > PIPES3D_MAX_SPAN:
         raise HTTPException(422, f"bbox 跨度不可超過 {PIPES3D_MAX_SPAN} 度")
 
+    # 整包 JSON 由 PostgreSQL 組好、原樣回傳，省掉 Python 解析再序列化（5000 筆約省一半時間，見 2-Tasks/1-效能評估.md）。
+    # 多取 1 筆（limit + 1）只用來判斷 truncated。
     sql = f"""
         WITH q AS (
             SELECT ST_Transform(ST_MakeEnvelope(%(w)s, %(s)s, %(e)s, %(n)s, 4326), 3826) AS box,
                    ST_Transform(ST_SetSRID(ST_MakePoint((%(w)s + %(e)s) / 2, (%(s)s + %(n)s) / 2), 4326), 3826) AS c
+        ), r AS (
+            SELECT p.gid, p.material AS mat, round(({_DIA_M})::numeric, 4)::float8 AS dia,
+                   p.start_dep AS sd, p.end_dep AS ed, p.geom,
+                   row_number() OVER (ORDER BY p.geom <-> q.c) AS rn
+            FROM utl_pipe p, q
+            WHERE p.geom && q.box
+            ORDER BY p.geom <-> q.c
+            LIMIT %(limit)s + 1
         )
-        SELECT p.gid, p.material AS mat, round(({_DIA_M})::numeric, 4)::float8 AS dia,
-               p.start_dep AS sd, p.end_dep AS ed,
-               ST_AsGeoJSON(ST_Transform(p.geom, 4326), 8)::json -> 'coordinates' AS coords
-        FROM utl_pipe p, q
-        WHERE p.geom && q.box
-        ORDER BY p.geom <-> q.c
-        LIMIT %(limit)s
+        SELECT json_build_object(
+            'truncated', count(*) > %(limit)s,
+            'pipes', coalesce(json_agg(json_build_object(
+                'gid', gid, 'mat', mat, 'dia', dia, 'sd', sd, 'ed', ed,
+                'coords', ST_AsGeoJSON(ST_Transform(geom, 4326), 8)::json -> 'coordinates'
+            ) ORDER BY rn) FILTER (WHERE rn <= %(limit)s), '[]'::json)
+        )::text
+        FROM r
     """
     with pool.connection() as conn:
-        rows = conn.execute(sql, {"w": w, "s": s, "e": e, "n": n, "limit": limit + 1}).fetchall()
-    truncated = len(rows) > limit
-    return {"truncated": truncated, "pipes": rows[:limit]}
+        body = conn.execute(sql, {"w": w, "s": s, "e": e, "n": n, "limit": limit}).fetchone()
+    return Response(next(iter(body.values())), media_type="application/json")
