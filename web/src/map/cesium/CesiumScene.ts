@@ -36,7 +36,7 @@ import type { RasterSourceSpecification } from 'maplibre-gl';
 import { BASEMAPS, type BasemapId } from '../basemaps';
 import { OVERLAYS, OVERLAY_IDS, type OverlayId } from '../overlays';
 import { TERRAINS, type TerrainId } from '../terrain';
-import { createTerrariumTerrain } from './terrariumTerrain';
+import { createHillshadeImagery, createTerrariumSource, createTerrariumTerrain } from './terrariumTerrain';
 import { MATERIALS, OTHER_CODE, OTHER_MATERIAL } from '../pipeStyle';
 import { metersPerPixel, zoomFromMetersPerPixel } from '../cameraScale';
 import { MAP_MAX_PITCH, PIPE3D_MAX_DEPTH, PIPE3D_MAX_SPAN, TAIPEI_CENTER } from '../../config';
@@ -145,6 +145,9 @@ export class CesiumScene {
   private basemapLayer: ImageryLayer | null = null;
   private readonly overlayLayers = new Map<OverlayId, ImageryLayer>();
   private terrain: TerrainId = 'none';
+  private terrainExaggeration = 1;
+  /** 陰影地形影像（高度圖地形不會依坡度打光，另外疊陰影才看得出起伏） */
+  private hillshadeLayer: ImageryLayer | null = null;
   /** 各管線種類一個 Primitive（關閉的種類只隱藏，不重建） */
   private readonly primitives = new Map<PipeKindId, Primitive>();
   /** 需要重建的種類（關閉中的種類等到打開時才建） */
@@ -244,21 +247,33 @@ export class CesiumScene {
   }
 
   /**
-   * 地形來源。開啟地形時地形高度也套用管線的垂直放大倍率（scene.verticalExaggeration），
-   * 這樣「Z 絕對高程」模式下管線與地形的相對位置不變；埋深模式的管線仍以高度 0 為地面（不貼齊地形）。
+   * 地形來源。地形放大倍率與管線分開（setTerrainExaggeration，預設 ×1）：跟著管線 ×5 時山區變形、
+   * 鏡頭容易跑進放大的山體裡。埋深模式的管線仍以高度 0 為地面（不貼齊地形）。
    */
   setTerrain(id: TerrainId) {
     if (id === this.terrain) return;
     this.terrain = id;
-    const src = TERRAINS[id].source;
-    this.viewer.terrainProvider = src
-      ? createTerrariumTerrain(src.tiles[0], src.maxzoom, src.attribution ?? '')
-      : new EllipsoidTerrainProvider();
+    const def = TERRAINS[id].source;
+    const src = def && createTerrariumSource(def.tiles[0], def.maxzoom, def.attribution ?? '');
+    this.viewer.terrainProvider = src ? createTerrariumTerrain(src) : new EllipsoidTerrainProvider();
+    if (this.hillshadeLayer) this.imagery.remove(this.hillshadeLayer, true);
+    this.hillshadeLayer = null;
+    if (src) {
+      // 在底圖之上、疊加圖層之下
+      this.hillshadeLayer = new ImageryLayer(createHillshadeImagery(src));
+      this.imagery.add(this.hillshadeLayer, this.basemapLayer ? 1 : 0);
+    }
+    this.applyExaggeration();
+  }
+
+  /** 地形垂直放大倍率（只影響地形，管線用自己的倍率） */
+  setTerrainExaggeration(k: number) {
+    this.terrainExaggeration = k;
     this.applyExaggeration();
   }
 
   private applyExaggeration() {
-    this.viewer.scene.verticalExaggeration = this.terrain === 'none' ? 1 : this.options.exaggeration;
+    this.viewer.scene.verticalExaggeration = this.terrain === 'none' ? 1 : this.terrainExaggeration;
     this.requestRender();
   }
 
@@ -479,7 +494,6 @@ export class CesiumScene {
 
   setPipeOptions(options: Pipe3DOptions) {
     this.options = options;
-    this.applyExaggeration();
     this.markAllDirty();
   }
 

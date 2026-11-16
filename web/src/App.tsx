@@ -95,6 +95,7 @@ export default function App() {
   const [overlays, setOverlays] = useState<Set<OverlayId>>(() => new Set());
   const [overlayOpacity, setOverlayOpacity] = useState(0.8);
   const [terrain, setTerrain] = useState<TerrainId>('none');
+  const [terrainExaggeration, setTerrainExaggeration] = useState(1);
   const [enabledMaterials, setEnabledMaterials] = useState<Set<string>>(
     () => new Set(ALL_MATERIAL_CODES),
   );
@@ -206,6 +207,8 @@ export default function App() {
         exaggeration={exaggeration}
         onExaggerationChange={setExaggeration}
         terrain={terrain}
+        terrainExaggeration={terrainExaggeration}
+        onTerrainExaggerationChange={setTerrainExaggeration}
         groundOpacity={groundOpacity}
         onGroundOpacityChange={setGroundOpacity}
         showFps={showFps}
@@ -253,6 +256,7 @@ export default function App() {
                 overlays={overlays}
                 overlayOpacity={overlayOpacity}
                 terrain={terrain}
+                terrainExaggeration={terrainExaggeration}
                 enabledMaterials={enabledMaterials}
                 enabledKinds={enabledKinds}
                 colorMode={colorMode}

@@ -35,6 +35,9 @@ interface Props {
   onExaggerationChange: (k: number) => void;
   /** 地形來源（在「圖層」選單切換） */
   terrain: TerrainId;
+  /** 地形垂直放大倍率（與管線分開） */
+  terrainExaggeration: number;
+  onTerrainExaggerationChange: (k: number) => void;
   /** 地面不透明度 0～1 */
   groundOpacity: number;
   onGroundOpacityChange: (v: number) => void;
@@ -105,12 +108,28 @@ export function Pipe3DSettingsDrawer(p: Props) {
             </p>
           </div>
           <div className="space-y-2">
-            <Label className={SECTION_LABEL}>
-              垂直／管徑放大 ×{p.exaggeration}
-              {p.terrain !== 'none' && '（地形高度同樣放大）'}
-            </Label>
+            <Label className={SECTION_LABEL}>管線垂直／管徑放大 ×{p.exaggeration}</Label>
             <Slider min={1} max={20} step={1} value={[p.exaggeration]} onValueChange={([v]) => p.onExaggerationChange(v)} />
           </div>
+          {p.terrain !== 'none' && (
+            <div className="space-y-2">
+              <Label className={SECTION_LABEL}>地形垂直放大 ×{p.terrainExaggeration}</Label>
+              <Slider
+                min={1}
+                max={5}
+                step={0.5}
+                value={[p.terrainExaggeration]}
+                onValueChange={([v]) => p.onTerrainExaggerationChange(v)}
+              />
+              {p.heightMode === 'z' && p.terrainExaggeration !== p.exaggeration && (
+                <Alert className={WARNING_ALERT}>
+                  <AlertDescription className="text-inherit">
+                    Z 值模式下，管線與地形的放大倍率不同時，兩者的相對高度會偏移；要對照位置請把兩個倍率設成一樣。
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
           <div className="space-y-2">
             <Label className={SECTION_LABEL}>地面不透明度 {Math.round(p.groundOpacity * 100)}%</Label>
             <Slider min={0} max={1} step={0.05} value={[p.groundOpacity]} onValueChange={([v]) => p.onGroundOpacityChange(v)} />

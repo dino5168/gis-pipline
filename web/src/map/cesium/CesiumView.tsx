@@ -27,6 +27,8 @@ interface Props {
   overlays: ReadonlySet<OverlayId>;
   overlayOpacity: number;
   terrain: TerrainId;
+  /** 地形垂直放大倍率 */
+  terrainExaggeration: number;
   enabledMaterials: ReadonlySet<string>;
   /** 要顯示的管線種類（各自向 API 載入） */
   enabledKinds: ReadonlySet<PipeKindId>;
@@ -90,6 +92,7 @@ export function CesiumView(p: Props) {
   useEffect(() => scene?.setBasemap(p.basemap), [scene, p.basemap]);
   useEffect(() => scene?.setOverlays(p.overlays, p.overlayOpacity), [scene, p.overlays, p.overlayOpacity]);
   useEffect(() => scene?.setTerrain(p.terrain), [scene, p.terrain]);
+  useEffect(() => scene?.setTerrainExaggeration(p.terrainExaggeration), [scene, p.terrainExaggeration]);
   useEffect(() => scene?.setGroundOpacity(p.groundOpacity), [scene, p.groundOpacity]);
   useEffect(() => scene?.setShowFps(p.showFps), [scene, p.showFps]);
 
