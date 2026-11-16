@@ -4,12 +4,15 @@ import { MapView } from './map/MapView';
 import { ControlPanel } from './components/ControlPanel';
 import { ALL_MATERIAL_CODES } from './map/pipeStyle';
 import type { BasemapId } from './map/basemaps';
+import type { OverlayId } from './map/overlays';
 import { DATA_BOUNDS, PIPES_CENTER } from './config';
 import type { HeightMode, Pipe3DStatus } from './types/pipe3d';
 
 export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [basemap, setBasemap] = useState<BasemapId>('emap');
+  const [overlays, setOverlays] = useState<Set<OverlayId>>(() => new Set());
+  const [overlayOpacity, setOverlayOpacity] = useState(0.8);
   const [enabledMaterials, setEnabledMaterials] = useState<Set<string>>(
     () => new Set(ALL_MATERIAL_CODES),
   );
@@ -35,6 +38,8 @@ export default function App() {
     <div className="relative h-full w-full">
       <MapView
         basemap={basemap}
+        overlays={overlays}
+        overlayOpacity={overlayOpacity}
         enabledMaterials={enabledMaterials}
         mapRef={mapRef}
         onZoomChange={setZoom}
@@ -46,6 +51,10 @@ export default function App() {
       <ControlPanel
         basemap={basemap}
         onBasemapChange={setBasemap}
+        overlays={overlays}
+        onOverlaysChange={setOverlays}
+        overlayOpacity={overlayOpacity}
+        onOverlayOpacityChange={setOverlayOpacity}
         enabledMaterials={enabledMaterials}
         onMaterialsChange={setEnabledMaterials}
         zoom={zoom}

@@ -1,5 +1,7 @@
-import { Layers, Map as MapIcon, TriangleAlert, ZoomIn } from 'lucide-react';
+import { LandPlot, Layers, Map as MapIcon, TriangleAlert, ZoomIn } from 'lucide-react';
 import { BASEMAPS, BASEMAP_IDS, type BasemapId } from '../map/basemaps';
+import type { OverlayId } from '../map/overlays';
+import { OverlayControls } from './OverlayControls';
 import { PIPE_MIN_ZOOM } from '../config';
 import { MaterialLegend } from './MaterialLegend';
 import { Pipe3DControls } from './Pipe3DControls';
@@ -8,6 +10,10 @@ import type { HeightMode, Pipe3DStatus } from '../types/pipe3d';
 interface Props {
   basemap: BasemapId;
   onBasemapChange: (id: BasemapId) => void;
+  overlays: ReadonlySet<OverlayId>;
+  onOverlaysChange: (next: Set<OverlayId>) => void;
+  overlayOpacity: number;
+  onOverlayOpacityChange: (v: number) => void;
   enabledMaterials: ReadonlySet<string>;
   onMaterialsChange: (next: Set<string>) => void;
   zoom: number | null;
@@ -44,6 +50,16 @@ export function ControlPanel(p: Props) {
           </option>
         ))}
       </select>
+
+      <h2 className="section-title">
+        <LandPlot size={13} /> 疊加圖層
+      </h2>
+      <OverlayControls
+        enabled={p.overlays}
+        onChange={p.onOverlaysChange}
+        opacity={p.overlayOpacity}
+        onOpacityChange={p.onOverlayOpacityChange}
+      />
 
       <h2 className="section-title">
         <Layers size={13} /> 管線材料

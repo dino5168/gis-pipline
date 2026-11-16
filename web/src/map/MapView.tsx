@@ -12,6 +12,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { PIPE_SOURCE_LAYER, PIPE_TILEJSON, TAIPEI_CENTER } from '../config';
 import { BASEMAPS, BASEMAP_IDS, basemapLayerId, type BasemapId } from './basemaps';
+import { OVERLAYS, OVERLAY_IDS, overlayLayerId, type OverlayId } from './overlays';
 import {
   PIPE_CASING_LAYER_ID,
   PIPE_LAYER_ID,
@@ -28,6 +29,9 @@ maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 interface Props {
   basemap: BasemapId;
+  overlays: ReadonlySet<OverlayId>;
+  /** 疊加圖層不透明度 0～1 */
+  overlayOpacity: number;
   enabledMaterials: ReadonlySet<string>;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
@@ -67,12 +71,24 @@ function buildStyle(initialBasemap: BasemapId): maplibregl.StyleSpecification {
       layout: { visibility: id === initialBasemap ? 'visible' : 'none' },
     });
   }
+  // 疊加圖層：在底圖之上、管線之下，預設隱藏（由 effect 依勾選切換）
+  for (const id of OVERLAY_IDS) {
+    sources[overlayLayerId(id)] = OVERLAYS[id].source;
+    layers.push({
+      id: overlayLayerId(id),
+      type: 'raster',
+      source: overlayLayerId(id),
+      layout: { visibility: 'none' },
+    });
+  }
   layers.push(...pipeLayers);
   return { version: 8, sources, layers };
 }
 
 export function MapView({
   basemap,
+  overlays,
+  overlayOpacity,
   enabledMaterials,
   mapRef,
   onZoomChange,
@@ -171,6 +187,20 @@ export function MapView({
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
   }, [basemap, mapRef]);
+
+  // ---- 疊加圖層（地籍等）顯示與不透明度
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      for (const id of OVERLAY_IDS) {
+        map.setLayoutProperty(overlayLayerId(id), 'visibility', overlays.has(id) ? 'visible' : 'none');
+        map.setPaintProperty(overlayLayerId(id), 'raster-opacity', overlayOpacity);
+      }
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [overlays, overlayOpacity, mapRef]);
 
   // ---- 材料篩選
   useEffect(() => {
