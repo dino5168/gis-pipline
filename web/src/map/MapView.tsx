@@ -14,6 +14,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { TAIPEI_CENTER, TILES_BASE } from '../config';
 import { BASEMAPS, BASEMAP_IDS, basemapLayerId, type BasemapId } from './basemaps';
 import { OVERLAYS, OVERLAY_IDS, overlayLayerId, type OverlayId } from './overlays';
+import { TERRAINS, TERRAIN_IDS, hillshadeLayerId, terrainSourceId, type TerrainId } from './terrain';
 import {
   PIPE_SOURCES,
   allPipeLayers,
@@ -44,6 +45,8 @@ interface Props {
   overlays: ReadonlySet<OverlayId>;
   /** 疊加圖層不透明度 0～1 */
   overlayOpacity: number;
+  /** 地形：2D 以陰影地形（hillshade）顯示 */
+  terrain: TerrainId;
   enabledMaterials: ReadonlySet<string>;
   /** 要顯示的管線種類 */
   enabledKinds: ReadonlySet<PipeKindId>;
@@ -88,6 +91,19 @@ function buildStyle(initialBasemap: BasemapId, initialColorMode: PipeColorMode):
       layout: { visibility: id === initialBasemap ? 'visible' : 'none' },
     });
   }
+  // 陰影地形：在底圖之上、疊加圖層之下，預設隱藏（由 effect 切換）
+  for (const id of TERRAIN_IDS) {
+    const src = TERRAINS[id].source;
+    if (!src) continue;
+    sources[terrainSourceId(id)] = src;
+    layers.push({
+      id: hillshadeLayerId(id),
+      type: 'hillshade',
+      source: terrainSourceId(id),
+      layout: { visibility: 'none' },
+      paint: { 'hillshade-exaggeration': 0.6, 'hillshade-shadow-color': '#3d4a55', 'hillshade-highlight-color': '#ffffff' },
+    });
+  }
   // 疊加圖層：在底圖之上、管線之下，預設隱藏（由 effect 依勾選切換）
   for (const id of OVERLAY_IDS) {
     sources[overlayLayerId(id)] = OVERLAYS[id].source;
@@ -106,6 +122,7 @@ export function MapView({
   basemap,
   overlays,
   overlayOpacity,
+  terrain,
   enabledMaterials,
   enabledKinds,
   colorMode,
@@ -236,6 +253,20 @@ export function MapView({
     else map.once('load', apply);
   }, [overlays, overlayOpacity, mapRef]);
 
+  // ---- 陰影地形
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      for (const id of TERRAIN_IDS) {
+        if (!TERRAINS[id].source) continue;
+        map.setLayoutProperty(hillshadeLayerId(id), 'visibility', id === terrain ? 'visible' : 'none');
+      }
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [terrain, mapRef]);
+
   // ---- 材料篩選
   useEffect(() => {
     const map = mapRef.current;
@@ -280,7 +311,9 @@ export function MapView({
   // ---- 出處：目前底圖＋開啟的疊加圖層（政府資料開放授權須顯名）
   const bm = BASEMAPS[basemap].source?.attribution;
   const attribution = [
-    ...new Set([bm, ...[...overlays].map((id) => OVERLAYS[id].source.attribution)].filter(Boolean)),
+    ...new Set(
+      [bm, TERRAINS[terrain].source?.attribution, ...[...overlays].map((id) => OVERLAYS[id].source.attribution)].filter(Boolean),
+    ),
     'MapLibre',
   ].join(' | ');
 

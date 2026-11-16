@@ -1,4 +1,4 @@
-// Cesium 3D 圖台：底圖／疊加圖層、半透明地面、3D 管線、與 2D 共用的視角換算。
+// Cesium 3D 圖台：底圖／疊加圖層、地形、半透明地面、3D 管線、與 2D 共用的視角換算。
 // 這個模組只能用動態 import() 載入（Cesium 很大，不放進主 bundle）；
 // 載入前必須先設定 window.CESIUM_BASE_URL（見 CesiumView.tsx）。
 import {
@@ -11,6 +11,7 @@ import {
   CylinderGeometry,
   DirectionalLight,
   Ellipsoid,
+  EllipsoidTerrainProvider,
   GeometryInstance,
   HeadingPitchRange,
   ImageryLayer,
@@ -34,6 +35,8 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import type { RasterSourceSpecification } from 'maplibre-gl';
 import { BASEMAPS, type BasemapId } from '../basemaps';
 import { OVERLAYS, OVERLAY_IDS, type OverlayId } from '../overlays';
+import { TERRAINS, type TerrainId } from '../terrain';
+import { createTerrariumTerrain } from './terrariumTerrain';
 import { MATERIALS, OTHER_CODE, OTHER_MATERIAL } from '../pipeStyle';
 import { metersPerPixel, zoomFromMetersPerPixel } from '../cameraScale';
 import { MAP_MAX_PITCH, PIPE3D_MAX_DEPTH, PIPE3D_MAX_SPAN, TAIPEI_CENTER } from '../../config';
@@ -141,6 +144,7 @@ export class CesiumScene {
   readonly viewer: Viewer;
   private basemapLayer: ImageryLayer | null = null;
   private readonly overlayLayers = new Map<OverlayId, ImageryLayer>();
+  private terrain: TerrainId = 'none';
   /** 各管線種類一個 Primitive（關閉的種類只隱藏，不重建） */
   private readonly primitives = new Map<PipeKindId, Primitive>();
   /** 需要重建的種類（關閉中的種類等到打開時才建） */
@@ -160,7 +164,7 @@ export class CesiumScene {
     this.kinds = init.kinds;
     this.colorMode = init.colorMode;
     this.viewer = new Viewer(container, {
-      // 不使用 Cesium ion（底圖改用國土測繪中心圖磚；地形用預設的平滑橢球面）
+      // 不使用 Cesium ion（底圖改用國土測繪中心圖磚；地形預設為平滑橢球面，可切換，見 setTerrain）
       baseLayer: false,
       baseLayerPicker: false,
       geocoder: false,
@@ -236,6 +240,25 @@ export class CesiumScene {
       layer.show = enabled.has(id);
       layer.alpha = opacity;
     }
+    this.requestRender();
+  }
+
+  /**
+   * 地形來源。開啟地形時地形高度也套用管線的垂直放大倍率（scene.verticalExaggeration），
+   * 這樣「Z 絕對高程」模式下管線與地形的相對位置不變；埋深模式的管線仍以高度 0 為地面（不貼齊地形）。
+   */
+  setTerrain(id: TerrainId) {
+    if (id === this.terrain) return;
+    this.terrain = id;
+    const src = TERRAINS[id].source;
+    this.viewer.terrainProvider = src
+      ? createTerrariumTerrain(src.tiles[0], src.maxzoom, src.attribution ?? '')
+      : new EllipsoidTerrainProvider();
+    this.applyExaggeration();
+  }
+
+  private applyExaggeration() {
+    this.viewer.scene.verticalExaggeration = this.terrain === 'none' ? 1 : this.options.exaggeration;
     this.requestRender();
   }
 
@@ -456,6 +479,7 @@ export class CesiumScene {
 
   setPipeOptions(options: Pipe3DOptions) {
     this.options = options;
+    this.applyExaggeration();
     this.markAllDirty();
   }
 

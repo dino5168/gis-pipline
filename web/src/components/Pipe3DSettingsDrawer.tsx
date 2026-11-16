@@ -6,6 +6,9 @@ import {
   type Pipe3DStatus,
   type SectionMode,
 } from '../types/pipe3d';
+import type { TerrainId } from '../map/terrain';
+import { WARNING_ALERT } from './PanelSection';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Pipe3DStatusLine } from './MapStatus';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,6 +33,8 @@ interface Props {
   onSectionChange: (m: SectionMode) => void;
   exaggeration: number;
   onExaggerationChange: (k: number) => void;
+  /** 地形來源（在「圖層」選單切換） */
+  terrain: TerrainId;
   /** 地面不透明度 0～1 */
   groundOpacity: number;
   onGroundOpacityChange: (v: number) => void;
@@ -73,6 +78,13 @@ export function Pipe3DSettingsDrawer(p: Props) {
                 ))}
               </SelectContent>
             </Select>
+            {p.terrain !== 'none' && p.heightMode !== 'z' && (
+              <Alert className={WARNING_ALERT}>
+                <AlertDescription className="text-inherit">
+                  已開啟地形，但埋深模式仍以高度 0 為地面，管線不會貼齊地形（地勢高處管線會顯得很深）。和地形對照請改用「Z 值（絕對高程）」。
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
           <div className="space-y-2">
             <Label className={SECTION_LABEL}>斷面</Label>
@@ -93,7 +105,10 @@ export function Pipe3DSettingsDrawer(p: Props) {
             </p>
           </div>
           <div className="space-y-2">
-            <Label className={SECTION_LABEL}>垂直／管徑放大 ×{p.exaggeration}</Label>
+            <Label className={SECTION_LABEL}>
+              垂直／管徑放大 ×{p.exaggeration}
+              {p.terrain !== 'none' && '（地形高度同樣放大）'}
+            </Label>
             <Slider min={1} max={20} step={1} value={[p.exaggeration]} onValueChange={([v]) => p.onExaggerationChange(v)} />
           </div>
           <div className="space-y-2">

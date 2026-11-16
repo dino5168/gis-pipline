@@ -1,7 +1,8 @@
-import { Ban } from 'lucide-react';
+import { Ban, Mountain } from 'lucide-react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
 import { BASEMAPS, BASEMAP_IDS, basemapThumbnail, thumbnailUrl, type BasemapId } from '../map/basemaps';
 import { OVERLAYS, OVERLAY_IDS, type OverlayId } from '../map/overlays';
+import { TERRAINS, TERRAIN_IDS, type TerrainId } from '../map/terrain';
 import { MEGA_TILE_CLASS, MegaSection, MegaTileBody, TileIcon, TileImages } from './MegaTile';
 import { MenubarContent, MenubarMenu, MenubarSeparator, MenubarTrigger } from '@/components/ui/menubar';
 import { Slider } from '@/components/ui/slider';
@@ -13,9 +14,11 @@ interface Props {
   onOverlaysChange: (next: Set<OverlayId>) => void;
   overlayOpacity: number;
   onOverlayOpacityChange: (v: number) => void;
+  terrain: TerrainId;
+  onTerrainChange: (id: TerrainId) => void;
 }
 
-/** 頂端選單「圖層」：Mega Menu，底圖（單選）＋疊加圖層（複選）縮圖方格，參考 Google 地圖圖層選擇 */
+/** 頂端選單「圖層」：Mega Menu，底圖（單選）＋地形（單選）＋疊加圖層（複選）縮圖方格，參考 Google 地圖圖層選擇 */
 export function LayersMegaMenu(p: Props) {
   const toggleOverlay = (id: OverlayId, on: boolean) => {
     const next = new Set(p.overlays);
@@ -47,6 +50,25 @@ export function LayersMegaMenu(p: Props) {
                 </MenubarPrimitive.RadioItem>
               );
             })}
+          </MenubarPrimitive.RadioGroup>
+        </MegaSection>
+
+        <MenubarSeparator className="mx-0" />
+
+        <MegaSection title="地形（2D 陰影／3D 起伏）">
+          <MenubarPrimitive.RadioGroup
+            value={p.terrain}
+            onValueChange={(v) => p.onTerrainChange(v as TerrainId)}
+            className="grid grid-cols-4 gap-2"
+          >
+            {TERRAIN_IDS.map((id) => (
+              <MenubarPrimitive.RadioItem key={id} value={id} title={TERRAINS[id].note} className={MEGA_TILE_CLASS}>
+                <MegaTileBody
+                  label={TERRAINS[id].name}
+                  thumb={<TileIcon>{TERRAINS[id].source ? <Mountain /> : <Ban />}</TileIcon>}
+                />
+              </MenubarPrimitive.RadioItem>
+            ))}
           </MenubarPrimitive.RadioGroup>
         </MegaSection>
 

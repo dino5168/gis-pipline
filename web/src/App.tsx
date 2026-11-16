@@ -13,6 +13,7 @@ import { SplitView, clampRatio } from './components/SplitView';
 import { ALL_MATERIAL_CODES } from './map/pipeStyle';
 import type { BasemapId } from './map/basemaps';
 import type { OverlayId } from './map/overlays';
+import type { TerrainId } from './map/terrain';
 import { DATA_BOUNDS, GROUND_OPACITY_DEFAULT, PIPES_CENTER } from './config';
 import type { HeightMode, Pipe3DStatus, SectionMode } from './types/pipe3d';
 import type { ViewMode } from './types/view';
@@ -93,6 +94,7 @@ export default function App() {
   const [basemap, setBasemap] = useState<BasemapId>('emap');
   const [overlays, setOverlays] = useState<Set<OverlayId>>(() => new Set());
   const [overlayOpacity, setOverlayOpacity] = useState(0.8);
+  const [terrain, setTerrain] = useState<TerrainId>('none');
   const [enabledMaterials, setEnabledMaterials] = useState<Set<string>>(
     () => new Set(ALL_MATERIAL_CODES),
   );
@@ -177,6 +179,8 @@ export default function App() {
         onOverlaysChange={setOverlays}
         overlayOpacity={overlayOpacity}
         onOverlayOpacityChange={setOverlayOpacity}
+        terrain={terrain}
+        onTerrainChange={setTerrain}
         enabledKinds={enabledKinds}
         onKindsChange={setEnabledKinds}
         colorMode={colorMode}
@@ -201,6 +205,7 @@ export default function App() {
         onSectionChange={setSection}
         exaggeration={exaggeration}
         onExaggerationChange={setExaggeration}
+        terrain={terrain}
         groundOpacity={groundOpacity}
         onGroundOpacityChange={setGroundOpacity}
         showFps={showFps}
@@ -230,6 +235,7 @@ export default function App() {
               basemap={basemap}
               overlays={overlays}
               overlayOpacity={overlayOpacity}
+              terrain={terrain}
               enabledMaterials={enabledMaterials}
               enabledKinds={enabledKinds}
               colorMode={colorMode}
@@ -246,6 +252,7 @@ export default function App() {
                 basemap={basemap}
                 overlays={overlays}
                 overlayOpacity={overlayOpacity}
+                terrain={terrain}
                 enabledMaterials={enabledMaterials}
                 enabledKinds={enabledKinds}
                 colorMode={colorMode}

@@ -4,6 +4,7 @@ import type * as maplibregl from 'maplibre-gl';
 import { CESIUM_BASE_URL, PIPE3D_LIMIT, PIPE3D_MIN_ZOOM } from '../../config';
 import type { BasemapId } from '../basemaps';
 import type { OverlayId } from '../overlays';
+import type { TerrainId } from '../terrain';
 import type { Pipe3DOptions, Pipe3DStatus, Pipes3DResponse } from '../../types/pipe3d';
 import type { CesiumScene } from './CesiumScene';
 import { bboxParam, clampSpan, covers, type LoadedArea } from './loadArea';
@@ -25,6 +26,7 @@ interface Props {
   basemap: BasemapId;
   overlays: ReadonlySet<OverlayId>;
   overlayOpacity: number;
+  terrain: TerrainId;
   enabledMaterials: ReadonlySet<string>;
   /** 要顯示的管線種類（各自向 API 載入） */
   enabledKinds: ReadonlySet<PipeKindId>;
@@ -87,6 +89,7 @@ export function CesiumView(p: Props) {
   // ---- 圖層
   useEffect(() => scene?.setBasemap(p.basemap), [scene, p.basemap]);
   useEffect(() => scene?.setOverlays(p.overlays, p.overlayOpacity), [scene, p.overlays, p.overlayOpacity]);
+  useEffect(() => scene?.setTerrain(p.terrain), [scene, p.terrain]);
   useEffect(() => scene?.setGroundOpacity(p.groundOpacity), [scene, p.groundOpacity]);
   useEffect(() => scene?.setShowFps(p.showFps), [scene, p.showFps]);
 

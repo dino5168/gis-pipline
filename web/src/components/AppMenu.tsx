@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { VIEW_MODE_LABELS, type ViewMode } from '../types/view';
 import type { BasemapId } from '../map/basemaps';
 import type { OverlayId } from '../map/overlays';
+import type { TerrainId } from '../map/terrain';
 import { LayersMegaMenu } from './LayersMegaMenu';
 import { PipesMegaMenu } from './PipesMegaMenu';
 import type { PipeColorMode, PipeKindId } from '../types/pipeKind';
@@ -25,6 +26,8 @@ interface Props {
   onOverlaysChange: (next: Set<OverlayId>) => void;
   overlayOpacity: number;
   onOverlayOpacityChange: (v: number) => void;
+  terrain: TerrainId;
+  onTerrainChange: (id: TerrainId) => void;
   enabledKinds: ReadonlySet<PipeKindId>;
   onKindsChange: (next: Set<PipeKindId>) => void;
   colorMode: PipeColorMode;
