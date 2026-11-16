@@ -9,6 +9,7 @@ import { ScaleBar } from '../../components/ScaleBar';
 import { metersPerPixel } from '../cameraScale';
 import { setPointerLngLat } from '../pointerCoord';
 import type { ScaleBarSettings } from '../../types/scaleBar';
+import { PIPE_KIND_IDS, type PipeColorMode, type PipeKindId } from '../../types/pipeKind';
 
 declare global {
   interface Window {
@@ -22,6 +23,9 @@ interface Props {
   overlays: ReadonlySet<OverlayId>;
   overlayOpacity: number;
   enabledMaterials: ReadonlySet<string>;
+  /** 要顯示的管線種類（各自向 API 載入） */
+  enabledKinds: ReadonlySet<PipeKindId>;
+  colorMode: PipeColorMode;
   pipe3dOptions: Pipe3DOptions;
   /** 地面不透明度 0～1 */
   groundOpacity: number;
@@ -53,6 +57,8 @@ export function CesiumView(p: Props) {
         created = new CesiumScene(containerRef.current, {
           options: cur.pipe3dOptions,
           materials: cur.enabledMaterials,
+          kinds: cur.enabledKinds,
+          colorMode: cur.colorMode,
         });
         setScene(created);
         cur.onStatus({ kind: 'off' });
@@ -79,6 +85,12 @@ export function CesiumView(p: Props) {
   // ---- 管線選項、材料篩選
   useEffect(() => scene?.setPipeOptions(p.pipe3dOptions), [scene, p.pipe3dOptions]);
   useEffect(() => scene?.setMaterials(p.enabledMaterials), [scene, p.enabledMaterials]);
+  useEffect(() => scene?.setKinds(p.enabledKinds), [scene, p.enabledKinds]);
+  useEffect(() => scene?.setColorMode(p.colorMode), [scene, p.colorMode]);
+
+  // 各種類最後載入的範圍（關閉再打開時，範圍沒變就不重抓）
+  const loadedBbox = useRef(new Map<PipeKindId, string>());
+  const loadedResult = useRef(new Map<PipeKindId, { count: number; truncated: boolean }>());
 
   // ---- 比例尺：畫面中心的地面解析度（鏡頭傾斜時只代表畫面中心附近）
   useEffect(() => {
@@ -94,34 +106,53 @@ export function CesiumView(p: Props) {
   // ---- 坐標顯示：滑鼠所指地面位置
   useEffect(() => scene?.onPointerMove(setPointerLngLat), [scene]);
 
-  // ---- 鏡頭停止時依畫面範圍載入管線
+  // ---- 鏡頭停止、或勾選的種類改變時，依畫面範圍載入勾選的管線種類
+  const { enabledKinds } = p;
   useEffect(() => {
     if (!scene) return;
-    let abort: AbortController | null = null;
-    let lastBbox = '';
+    const abort = new AbortController();
     const status = (s: Pipe3DStatus) => latest.current.onStatus(s);
+    const kinds = PIPE_KIND_IDS.filter((k) => enabledKinds.has(k));
+    let seq = 0;
+
+    const summary = (): Pipe3DStatus => {
+      let count = 0, truncated = false;
+      for (const k of kinds) {
+        const r = loadedResult.current.get(k);
+        if (r) {
+          count += r.count;
+          truncated ||= r.truncated;
+        }
+      }
+      return { kind: 'ready', count, truncated };
+    };
 
     const load = async () => {
+      const mine = ++seq;
+      if (kinds.length === 0) return status({ kind: 'off' });
       const view = scene.getView();
       if (!view) return; // 鏡頭在地面下：保留目前的管線
-      if (view.zoom < PIPE3D_MIN_ZOOM) {
-        status({ kind: 'zoom-in', minZoom: PIPE3D_MIN_ZOOM });
-        return;
-      }
+      if (view.zoom < PIPE3D_MIN_ZOOM) return status({ kind: 'zoom-in', minZoom: PIPE3D_MIN_ZOOM });
       const bbox = scene.loadBbox(view);
-      if (bbox === lastBbox) return;
-      abort?.abort();
-      abort = new AbortController();
+      const todo = kinds.filter((k) => loadedBbox.current.get(k) !== bbox);
+      if (todo.length === 0) return status(summary());
       status({ kind: 'loading' });
       try {
-        const res = await fetch(`/api/pipes3d?bbox=${bbox}&limit=${PIPE3D_LIMIT}`, { signal: abort.signal });
-        if (!res.ok) throw new Error(`API 回應 ${res.status}`);
-        const data = (await res.json()) as Pipes3DResponse;
-        lastBbox = bbox;
-        scene.setPipes(data.pipes);
-        status({ kind: 'ready', count: data.pipes.length, truncated: data.truncated });
+        await Promise.all(
+          todo.map(async (k) => {
+            const url = `/api/pipes3d?bbox=${bbox}&limit=${PIPE3D_LIMIT}&layer=${k}`;
+            const res = await fetch(url, { signal: abort.signal });
+            if (!res.ok) throw new Error(`API 回應 ${res.status}`);
+            const data = (await res.json()) as Pipes3DResponse;
+            if (abort.signal.aborted) return;
+            loadedBbox.current.set(k, bbox);
+            loadedResult.current.set(k, { count: data.pipes.length, truncated: data.truncated });
+            scene.setPipes(k, data.pipes);
+          }),
+        );
+        if (mine === seq) status(summary());
       } catch (err) {
-        if ((err as Error).name === 'AbortError') return;
+        if ((err as Error).name === 'AbortError' || abort.signal.aborted) return;
         status({ kind: 'error', message: `無法載入 3D 管線：${(err as Error).message}（API 是否已啟動？）` });
       }
     };
@@ -130,9 +161,9 @@ export function CesiumView(p: Props) {
     void load();
     return () => {
       off();
-      abort?.abort();
+      abort.abort();
     };
-  }, [scene]);
+  }, [scene, enabledKinds]);
 
   return (
     <div className="relative h-full w-full">

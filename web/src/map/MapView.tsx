@@ -10,15 +10,16 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 // MapLibre 6 預設從主程式旁邊載入 worker，但 Vite 會把主程式預先打包到 .vite/deps，
 // 那裡沒有 worker 檔 → 地圖整張不畫。改成明確指定 worker 位址。
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-import { MAP_MAX_PITCH, PIPE_SOURCE_LAYER, PIPE_TILEJSON, TAIPEI_CENTER } from '../config';
+import { MAP_MAX_PITCH, TAIPEI_CENTER, TILES_BASE } from '../config';
 import { BASEMAPS, BASEMAP_IDS, basemapLayerId, type BasemapId } from './basemaps';
 import { OVERLAYS, OVERLAY_IDS, overlayLayerId, type OverlayId } from './overlays';
 import {
-  PIPE_CASING_LAYER_ID,
-  PIPE_LAYER_ID,
-  PIPE_SOURCE_ID,
+  PIPE_SOURCES,
+  allPipeLayers,
   materialFilter,
-  pipeLayers,
+  pipeCasingLayerId,
+  pipeColor,
+  pipeLayerId,
 } from './pipeStyle';
 import { PipeAttributeTable } from '../components/PipeAttributeTable';
 import { ScaleBar } from '../components/ScaleBar';
@@ -26,6 +27,14 @@ import { metersPerPixel } from './cameraScale';
 import { setPointerLngLat } from './pointerCoord';
 import type { ScaleBarSettings } from '../types/scaleBar';
 import type { PipeProperties } from '../types/pipe';
+import {
+  PIPE_KINDS,
+  PIPE_KIND_BY_ID,
+  PIPE_KIND_IDS,
+  isPipeKindId,
+  type PipeColorMode,
+  type PipeKindId,
+} from '../types/pipeKind';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
@@ -35,6 +44,9 @@ interface Props {
   /** 疊加圖層不透明度 0～1 */
   overlayOpacity: number;
   enabledMaterials: ReadonlySet<string>;
+  /** 要顯示的管線種類 */
+  enabledKinds: ReadonlySet<PipeKindId>;
+  colorMode: PipeColorMode;
   scaleBar: ScaleBarSettings;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
@@ -43,20 +55,24 @@ interface Props {
 }
 
 interface Selection {
+  kind: PipeKindId;
   id: string | number;
   props: Partial<PipeProperties>;
 }
 
-const featureId = (id: string | number): FeatureIdentifier => ({
-  source: PIPE_SOURCE_ID,
-  sourceLayer: PIPE_SOURCE_LAYER,
-  id,
+/** 全部管線種類的本體圖層（滑過、點選用） */
+const PIPE_LAYER_IDS = PIPE_KIND_IDS.map(pipeLayerId);
+
+/** 圖徵 → feature-state 用的識別（source 依管線種類不同） */
+const featureId = (f: { source: string; sourceLayer?: string; id: string | number }): FeatureIdentifier => ({
+  source: f.source,
+  sourceLayer: f.sourceLayer,
+  id: f.id,
 });
 
-function buildStyle(initialBasemap: BasemapId): maplibregl.StyleSpecification {
-  const sources: Record<string, SourceSpecification> = {
-    [PIPE_SOURCE_ID]: { type: 'vector', url: PIPE_TILEJSON },
-  };
+function buildStyle(initialBasemap: BasemapId, initialColorMode: PipeColorMode): maplibregl.StyleSpecification {
+  const sources: Record<string, SourceSpecification> = {};
+  for (const src of PIPE_SOURCES) sources[src.id] = { type: 'vector', url: src.url };
   const layers: LayerSpecification[] = [
     { id: 'background', type: 'background', paint: { 'background-color': '#f6f8fa' } },
   ];
@@ -81,7 +97,7 @@ function buildStyle(initialBasemap: BasemapId): maplibregl.StyleSpecification {
       layout: { visibility: 'none' },
     });
   }
-  layers.push(...pipeLayers);
+  layers.push(...allPipeLayers(initialColorMode));
   return { version: 8, sources, layers };
 }
 
@@ -90,6 +106,8 @@ export function MapView({
   overlays,
   overlayOpacity,
   enabledMaterials,
+  enabledKinds,
+  colorMode,
   scaleBar,
   mapRef,
   onZoomChange,
@@ -108,7 +126,7 @@ export function MapView({
   useEffect(() => {
     const map = new maplibregl.Map({
       container: containerRef.current!,
-      style: buildStyle(basemap),
+      style: buildStyle(basemap, colorMode),
       center: TAIPEI_CENTER,
       zoom: 15,
       maxZoom: 21,
@@ -129,8 +147,8 @@ export function MapView({
     map.on('load', reportScale);
     map.on('error', (e) => {
       const err = e as maplibregl.ErrorEvent & { sourceId?: string };
-      if (err.sourceId === PIPE_SOURCE_ID || String(err.error?.message ?? '').includes(PIPE_TILEJSON)) {
-        cb.current.onTileError(`無法連線圖磚服務 ${PIPE_TILEJSON}，請先執行 tiles\\start-martin.ps1。`);
+      if (err.sourceId?.startsWith('pipes-') || String(err.error?.message ?? '').includes(TILES_BASE)) {
+        cb.current.onTileError(`無法連線圖磚服務 ${TILES_BASE}，請先執行 tiles\\start-martin.ps1（新增管線種類後要重啟 Martin）。`);
       }
     });
 
@@ -139,36 +157,39 @@ export function MapView({
     map.getCanvasContainer().addEventListener('mouseleave', () => setPointerLngLat(null));
 
     // ---- 滑過
-    let hoverId: string | number | null = null;
-    map.on('mousemove', PIPE_LAYER_ID, (e) => {
-      const id = e.features?.[0]?.id;
-      if (id === undefined) return;
+    let hover: FeatureIdentifier | null = null;
+    const sameFeature = (a: FeatureIdentifier, b: FeatureIdentifier) => a.source === b.source && a.id === b.id;
+    map.on('mousemove', PIPE_LAYER_IDS, (e) => {
+      const f = e.features?.[0];
+      if (!f || f.id === undefined) return;
+      const fid = featureId({ source: f.source, sourceLayer: f.sourceLayer, id: f.id });
       map.getCanvas().style.cursor = 'pointer';
-      if (hoverId !== null && hoverId !== id) map.setFeatureState(featureId(hoverId), { hover: false });
-      hoverId = id;
-      map.setFeatureState(featureId(id), { hover: true });
+      if (hover && !sameFeature(hover, fid)) map.setFeatureState(hover, { hover: false });
+      hover = fid;
+      map.setFeatureState(fid, { hover: true });
     });
-    map.on('mouseleave', PIPE_LAYER_ID, () => {
+    map.on('mouseleave', PIPE_LAYER_IDS, () => {
       map.getCanvas().style.cursor = '';
-      if (hoverId !== null) map.setFeatureState(featureId(hoverId), { hover: false });
-      hoverId = null;
+      if (hover) map.setFeatureState(hover, { hover: false });
+      hover = null;
     });
 
     // ---- 點選：屬性視窗內容由 React 透過 portal 繪製
-    let selectedId: string | number | null = null;
+    let selected: FeatureIdentifier | null = null;
     const popup = new maplibregl.Popup({ maxWidth: '340px' }).setDOMContent(popupNode);
     popup.on('close', () => {
-      if (selectedId !== null) map.setFeatureState(featureId(selectedId), { selected: false });
-      selectedId = null;
+      if (selected) map.setFeatureState(selected, { selected: false });
+      selected = null;
       setSelection(null);
     });
-    map.on('click', PIPE_LAYER_ID, (e) => {
+    map.on('click', PIPE_LAYER_IDS, (e) => {
+      // 多種管線重疊時取最上層的那條
       const f = e.features?.[0];
-      if (!f || f.id === undefined) return;
+      if (!f || f.id === undefined || !isPipeKindId(f.sourceLayer)) return;
       popup.remove(); // 先關閉舊視窗（觸發 close 清除舊選取），再設定新選取
-      selectedId = f.id;
-      map.setFeatureState(featureId(f.id), { selected: true });
-      setSelection({ id: f.id, props: f.properties as Partial<PipeProperties> });
+      selected = featureId({ source: f.source, sourceLayer: f.sourceLayer, id: f.id });
+      map.setFeatureState(selected, { selected: true });
+      setSelection({ kind: f.sourceLayer, id: f.id, props: f.properties as Partial<PipeProperties> });
       popup.setLngLat(e.lngLat).addTo(map);
     });
 
@@ -214,12 +235,40 @@ export function MapView({
     if (!map) return;
     const apply = () => {
       const filter = materialFilter(enabledMaterials);
-      map.setFilter(PIPE_LAYER_ID, filter);
-      map.setFilter(PIPE_CASING_LAYER_ID, filter);
+      for (const k of PIPE_KIND_IDS) {
+        map.setFilter(pipeLayerId(k), filter);
+        map.setFilter(pipeCasingLayerId(k), filter);
+      }
     };
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
   }, [enabledMaterials, mapRef]);
+
+  // ---- 管線種類顯示
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      for (const k of PIPE_KIND_IDS) {
+        const v = enabledKinds.has(k) ? 'visible' : 'none';
+        map.setLayoutProperty(pipeLayerId(k), 'visibility', v);
+        map.setLayoutProperty(pipeCasingLayerId(k), 'visibility', v);
+      }
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [enabledKinds, mapRef]);
+
+  // ---- 著色方式
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      for (const k of PIPE_KINDS) map.setPaintProperty(pipeLayerId(k.id), 'line-color', pipeColor(k, colorMode));
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [colorMode, mapRef]);
 
   // ---- 出處：目前底圖＋開啟的疊加圖層（政府資料開放授權須顯名）
   const bm = BASEMAPS[basemap].source?.attribution;
@@ -234,7 +283,10 @@ export function MapView({
           會蓋過 Tailwind 4（在 @layer 內）的 absolute，容器高度變 0 */}
       <div ref={containerRef} className="h-full w-full" />
       {selection &&
-        createPortal(<PipeAttributeTable id={selection.id} props={selection.props} />, popupNode)}
+        createPortal(
+          <PipeAttributeTable title={PIPE_KIND_BY_ID[selection.kind].name} id={selection.id} props={selection.props} />,
+          popupNode,
+        )}
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
     </div>
   );

@@ -5,7 +5,10 @@ import { CesiumView } from './map/cesium/CesiumView';
 import type { CesiumScene } from './map/cesium/CesiumScene';
 import { useViewSync, type ActivePane } from './map/useViewSync';
 import { AppMenu } from './components/AppMenu';
-import { ControlPanel } from './components/ControlPanel';
+import { MapStatus } from './components/MapStatus';
+import { MaterialFilterDrawer } from './components/MaterialFilterDrawer';
+import { Pipe3DSettingsDrawer } from './components/Pipe3DSettingsDrawer';
+import { PIPE_KIND_IDS, type PipeColorMode, type PipeKindId } from './types/pipeKind';
 import { SplitView, clampRatio } from './components/SplitView';
 import { ALL_MATERIAL_CODES } from './map/pipeStyle';
 import type { BasemapId } from './map/basemaps';
@@ -93,6 +96,10 @@ export default function App() {
   const [enabledMaterials, setEnabledMaterials] = useState<Set<string>>(
     () => new Set(ALL_MATERIAL_CODES),
   );
+  const [enabledKinds, setEnabledKinds] = useState<Set<PipeKindId>>(() => new Set(PIPE_KIND_IDS));
+  const [colorMode, setColorMode] = useState<PipeColorMode>('kind');
+  const [materialFilterOpen, setMaterialFilterOpen] = useState(false);
+  const [pipe3dSettingsOpen, setPipe3dSettingsOpen] = useState(false);
   const [zoom, setZoom] = useState<number | null>(null);
   const [tileError, setTileError] = useState<string | null>(null);
   const [heightMode, setHeightMode] = useState<HeightMode>('depth-top');
@@ -147,14 +154,14 @@ export default function App() {
   }, [mode, splitRatio]);
 
   // 畫面中心在資料範圍內就原地放大，否則飛到台北市中心（由 2D 帶動，3D 跟著同步）
-  const zoomToPipes = useCallback(() => {
+  const zoomToPipes = useCallback((zoom: number) => {
     const map = mapRef.current;
     if (!map) return;
     activeRef.current = '2d';
     const c = map.getCenter();
     const [w, s, e, n] = DATA_BOUNDS;
     const inside = c.lng >= w && c.lng <= e && c.lat >= s && c.lat <= n;
-    map.flyTo({ center: inside ? c : PIPES_CENTER, zoom: 14 });
+    map.flyTo({ center: inside ? c : PIPES_CENTER, zoom: Math.max(zoom, map.getZoom()) });
   }, []);
 
   return (
@@ -168,8 +175,31 @@ export default function App() {
         onOverlaysChange={setOverlays}
         overlayOpacity={overlayOpacity}
         onOverlayOpacityChange={setOverlayOpacity}
+        enabledKinds={enabledKinds}
+        onKindsChange={setEnabledKinds}
+        colorMode={colorMode}
+        onColorModeChange={setColorMode}
+        onOpenMaterialFilter={() => setMaterialFilterOpen(true)}
+        onOpenPipe3DSettings={() => setPipe3dSettingsOpen(true)}
         onOpenScaleSettings={() => setScaleSettingsOpen(true)}
         onOpenCoordSettings={() => setCoordSettingsOpen(true)}
+      />
+      <MaterialFilterDrawer
+        open={materialFilterOpen}
+        onOpenChange={setMaterialFilterOpen}
+        enabled={enabledMaterials}
+        onChange={setEnabledMaterials}
+      />
+      <Pipe3DSettingsDrawer
+        open={pipe3dSettingsOpen}
+        onOpenChange={setPipe3dSettingsOpen}
+        heightMode={heightMode}
+        onHeightModeChange={setHeightMode}
+        exaggeration={exaggeration}
+        onExaggerationChange={setExaggeration}
+        groundOpacity={groundOpacity}
+        onGroundOpacityChange={setGroundOpacity}
+        status={pipe3dStatus}
       />
       <ScaleBarSettingsDrawer
         open={scaleSettingsOpen}
@@ -195,6 +225,8 @@ export default function App() {
               overlays={overlays}
               overlayOpacity={overlayOpacity}
               enabledMaterials={enabledMaterials}
+              enabledKinds={enabledKinds}
+              colorMode={colorMode}
               scaleBar={scaleBar}
               mapRef={mapRef}
               onZoomChange={setZoom}
@@ -209,6 +241,8 @@ export default function App() {
                 overlays={overlays}
                 overlayOpacity={overlayOpacity}
                 enabledMaterials={enabledMaterials}
+                enabledKinds={enabledKinds}
+                colorMode={colorMode}
                 pipe3dOptions={pipe3dOptions}
                 groundOpacity={groundOpacity}
                 scaleBar={scaleBar}
@@ -219,21 +253,14 @@ export default function App() {
           }
         />
         <CoordinateDisplay settings={coordDisplay} />
-        <ControlPanel
+        <MapStatus
           show2d={show2d}
           show3d={show3d}
-          enabledMaterials={enabledMaterials}
-          onMaterialsChange={setEnabledMaterials}
           zoom={zoom}
+          enabledKinds={enabledKinds}
           tileError={tileError}
-          onZoomToPipes={zoomToPipes}
-          heightMode={heightMode}
-          onHeightModeChange={setHeightMode}
-          exaggeration={exaggeration}
-          onExaggerationChange={setExaggeration}
-          groundOpacity={groundOpacity}
-          onGroundOpacityChange={setGroundOpacity}
           pipe3dStatus={pipe3dStatus}
+          onZoomTo={zoomToPipes}
         />
       </div>
     </div>

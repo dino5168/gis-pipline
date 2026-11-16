@@ -3,11 +3,14 @@ import type {
   FilterSpecification,
   LineLayerSpecification,
 } from 'maplibre-gl';
-import { PIPE_SOURCE_LAYER } from '../config';
+import { TILES_BASE } from '../config';
+import { PIPE_KINDS, type PipeColorMode, type PipeKind, type PipeKindId } from '../types/pipeKind';
 
-export const PIPE_SOURCE_ID = 'pipes';
-export const PIPE_LAYER_ID = 'pipes';
-export const PIPE_CASING_LAYER_ID = 'pipes-casing';
+// 每種管線一個 vector source（source-layer = 資料表名稱）、兩個圖層（白色外框＋本體）
+export const pipeSourceId = (kind: PipeKindId) => `pipes-${kind}`;
+export const pipeLayerId = (kind: PipeKindId) => `pipes-${kind}`;
+export const pipeCasingLayerId = (kind: PipeKindId) => `pipes-${kind}-casing`;
+export const pipeTileJson = (kind: PipeKindId) => `${TILES_BASE}/${kind}`;
 
 export interface Material {
   code: string;
@@ -50,27 +53,42 @@ const widthExpr = (extra: number | ExpressionSpecification): ExpressionSpecifica
 ];
 const hoverExtra: ExpressionSpecification = ['case', ['boolean', ['feature-state', 'hover'], false], 3, 0];
 
-export const pipeLayers: LineLayerSpecification[] = [
-  {
-    id: PIPE_CASING_LAYER_ID,
+/** 管線本體顏色（選取時固定黃色） */
+export function pipeColor(kind: PipeKind, mode: PipeColorMode): ExpressionSpecification {
+  return [
+    'case',
+    ['boolean', ['feature-state', 'selected'], false],
+    '#ffd400',
+    mode === 'kind' ? kind.color : colorExpr,
+  ];
+}
+
+export function pipeLayers(kind: PipeKind, mode: PipeColorMode): LineLayerSpecification[] {
+  const id = kind.id as PipeKindId;
+  const common = {
     type: 'line',
-    source: PIPE_SOURCE_ID,
-    'source-layer': PIPE_SOURCE_LAYER,
+    source: pipeSourceId(id),
+    'source-layer': id,
+    minzoom: kind.minZoom,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#ffffff', 'line-opacity': 0.7, 'line-width': widthExpr(1.5) },
-  },
-  {
-    id: PIPE_LAYER_ID,
-    type: 'line',
-    source: PIPE_SOURCE_ID,
-    'source-layer': PIPE_SOURCE_LAYER,
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: {
-      'line-color': ['case', ['boolean', ['feature-state', 'selected'], false], '#ffd400', colorExpr],
-      'line-width': widthExpr(hoverExtra),
+  } as const;
+  return [
+    {
+      ...common,
+      id: pipeCasingLayerId(id),
+      paint: { 'line-color': '#ffffff', 'line-opacity': 0.7, 'line-width': widthExpr(1.5) },
     },
-  },
-];
+    {
+      ...common,
+      id: pipeLayerId(id),
+      paint: { 'line-color': pipeColor(kind, mode), 'line-width': widthExpr(hoverExtra) },
+    },
+  ];
+}
+
+/** 全部種類的 source 與圖層（PIPE_KINDS 後面的畫在上面） */
+export const PIPE_SOURCES = PIPE_KINDS.map((k) => ({ id: pipeSourceId(k.id), url: pipeTileJson(k.id) }));
+export const allPipeLayers = (mode: PipeColorMode) => PIPE_KINDS.flatMap((k) => pipeLayers(k, mode));
 
 /** 依勾選的材料產生圖層篩選條件 */
 export function materialFilter(enabled: ReadonlySet<string>): FilterSpecification {

@@ -5,6 +5,8 @@ import { VIEW_MODE_LABELS, type ViewMode } from '../types/view';
 import type { BasemapId } from '../map/basemaps';
 import type { OverlayId } from '../map/overlays';
 import { LayersMegaMenu } from './LayersMegaMenu';
+import { PipesMegaMenu } from './PipesMegaMenu';
+import type { PipeColorMode, PipeKindId } from '../types/pipeKind';
 import { MEGA_TILE_CLASS, MegaSection, MegaTileBody, TileIcon } from './MegaTile';
 import { Menubar, MenubarContent, MenubarItem, MenubarMenu, MenubarTrigger } from '@/components/ui/menubar';
 
@@ -23,6 +25,12 @@ interface Props {
   onOverlaysChange: (next: Set<OverlayId>) => void;
   overlayOpacity: number;
   onOverlayOpacityChange: (v: number) => void;
+  enabledKinds: ReadonlySet<PipeKindId>;
+  onKindsChange: (next: Set<PipeKindId>) => void;
+  colorMode: PipeColorMode;
+  onColorModeChange: (m: PipeColorMode) => void;
+  onOpenMaterialFilter: () => void;
+  onOpenPipe3DSettings: () => void;
   onOpenScaleSettings: () => void;
   onOpenCoordSettings: () => void;
 }
@@ -33,6 +41,12 @@ export function AppMenu({
   onModeChange,
   onOpenScaleSettings,
   onOpenCoordSettings,
+  enabledKinds,
+  onKindsChange,
+  colorMode,
+  onColorModeChange,
+  onOpenMaterialFilter,
+  onOpenPipe3DSettings,
   ...layers
 }: Props) {
   return (
@@ -58,6 +72,14 @@ export function AppMenu({
           </MenubarContent>
         </MenubarMenu>
         <LayersMegaMenu {...layers} />
+        <PipesMegaMenu
+          enabledKinds={enabledKinds}
+          onKindsChange={onKindsChange}
+          colorMode={colorMode}
+          onColorModeChange={onColorModeChange}
+          onOpenMaterialFilter={onOpenMaterialFilter}
+          onOpenPipe3DSettings={onOpenPipe3DSettings}
+        />
         <MenubarMenu>
           <MenubarTrigger>設定</MenubarTrigger>
           <MenubarContent>

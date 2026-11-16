@@ -38,6 +38,7 @@ import { metersPerPixel, zoomFromMetersPerPixel } from '../cameraScale';
 import { MAP_MAX_PITCH, PIPE3D_MAX_DEPTH, PIPE3D_MAX_SPAN, TAIPEI_CENTER } from '../../config';
 import type { CameraView } from '../../types/view';
 import type { Pipe3D, Pipe3DOptions } from '../../types/pipe3d';
+import { PIPE_KINDS, type PipeColorMode, type PipeKindId } from '../../types/pipeKind';
 
 /** 管徑缺值時的預設（公尺） */
 const DEFAULT_DIA = 0.2;
@@ -47,6 +48,21 @@ const CYLINDER_SLICES = 10;
 const MAIN_CODES = new Set(MATERIALS.map((m) => m.code));
 const MATERIAL_COLORS = new Map(MATERIALS.map((m) => [m.code, Color.fromCssColorString(m.color)]));
 const OTHER_COLOR = Color.fromCssColorString(OTHER_MATERIAL.color);
+const KIND_COLORS = new Map<PipeKindId, Color>(PIPE_KINDS.map((k) => [k.id, Color.fromCssColorString(k.color)]));
+
+/** 3D 管線的初始狀態 */
+export interface PipeSceneInit {
+  options: Pipe3DOptions;
+  materials: ReadonlySet<string>;
+  kinds: ReadonlySet<PipeKindId>;
+  colorMode: PipeColorMode;
+}
+
+/** 圓柱 instance 的 id（點選時由 scene.pick 取回） */
+export interface PipePickId {
+  layer: PipeKindId;
+  gid: number;
+}
 
 const clampDepth = (d: number | null) => Math.min(Math.max(d ?? 0, 0), PIPE3D_MAX_DEPTH);
 
@@ -77,13 +93,18 @@ export class CesiumScene {
   private basemapLayer: ImageryLayer | null = null;
   private readonly overlayLayers = new Map<OverlayId, ImageryLayer>();
   private pipesPrimitive: Primitive | null = null;
-  private pipes: Pipe3D[] = [];
+  /** 各管線種類已載入的資料（關閉的種類保留資料，只是不畫） */
+  private readonly pipes = new Map<PipeKindId, Pipe3D[]>();
   private options: Pipe3DOptions;
   private materials: ReadonlySet<string>;
+  private kinds: ReadonlySet<PipeKindId>;
+  private colorMode: PipeColorMode;
 
-  constructor(container: HTMLElement, init: { options: Pipe3DOptions; materials: ReadonlySet<string> }) {
+  constructor(container: HTMLElement, init: PipeSceneInit) {
     this.options = init.options;
     this.materials = init.materials;
+    this.kinds = init.kinds;
+    this.colorMode = init.colorMode;
     this.viewer = new Viewer(container, {
       // 不使用 Cesium ion（底圖改用國土測繪中心圖磚；地形用預設的平滑橢球面）
       baseLayer: false,
@@ -252,8 +273,18 @@ export class CesiumScene {
 
   // ---------------- 3D 管線
 
-  setPipes(pipes: Pipe3D[]) {
-    this.pipes = pipes;
+  setPipes(kind: PipeKindId, pipes: Pipe3D[]) {
+    this.pipes.set(kind, pipes);
+    if (this.kinds.has(kind)) this.rebuild();
+  }
+
+  setKinds(kinds: ReadonlySet<PipeKindId>) {
+    this.kinds = kinds;
+    this.rebuild();
+  }
+
+  setColorMode(mode: PipeColorMode) {
+    this.colorMode = mode;
     this.rebuild();
   }
 
@@ -271,7 +302,12 @@ export class CesiumScene {
     return mat && MAIN_CODES.has(mat) ? this.materials.has(mat) : this.materials.has(OTHER_CODE);
   }
 
-  /** 依資料、選項、材料篩選重建所有圓柱（每一段折線一個 instance，合成一個 Primitive） */
+  private pipeColor(kind: PipeKindId, mat: string | null): Color {
+    if (this.colorMode === 'kind') return KIND_COLORS.get(kind) ?? OTHER_COLOR;
+    return (mat && MATERIAL_COLORS.get(mat)) || OTHER_COLOR;
+  }
+
+  /** 依資料、選項、種類、材料篩選重建所有圓柱（每一段折線一個 instance，合成一個 Primitive） */
   private rebuild() {
     const primitives = this.viewer.scene.primitives;
     if (this.pipesPrimitive) primitives.remove(this.pipesPrimitive); // remove 會一併 destroy
@@ -280,47 +316,51 @@ export class CesiumScene {
     const { heightMode, exaggeration: k } = this.options;
     const instances: GeometryInstance[] = [];
 
-    for (const p of this.pipes) {
-      const n = p.coords.length;
-      if (n < 2 || !this.materialShown(p.mat)) continue;
-      const r = (p.dia && p.dia > 0 ? p.dia : DEFAULT_DIA) / 2;
-      const color = ColorGeometryInstanceAttribute.fromColor((p.mat && MATERIAL_COLORS.get(p.mat)) || OTHER_COLOR);
+    for (const [kind, pipes] of this.pipes) {
+      if (!this.kinds.has(kind)) continue;
+      for (const p of pipes) {
+        const n = p.coords.length;
+        if (n < 2 || !this.materialShown(p.mat)) continue;
+        const r = (p.dia && p.dia > 0 ? p.dia : DEFAULT_DIA) / 2;
+        const color = ColorGeometryInstanceAttribute.fromColor(this.pipeColor(kind, p.mat));
+        const id: PipePickId = { layer: kind, gid: p.gid };
 
-      // 沿線累積水平長度（埋深由起點內插到終點）
-      const ground = p.coords.map(([lng, lat]) => Cartesian3.fromDegrees(lng, lat, 0));
-      const acc = [0];
-      for (let j = 1; j < n; j++) acc.push(acc[j - 1] + Cartesian3.distance(ground[j - 1], ground[j]));
-      const total = acc[n - 1] || 1;
-      const sd = clampDepth(p.sd), ed = clampDepth(p.ed);
+        // 沿線累積水平長度（埋深由起點內插到終點）
+        const ground = p.coords.map(([lng, lat]) => Cartesian3.fromDegrees(lng, lat, 0));
+        const acc = [0];
+        for (let j = 1; j < n; j++) acc.push(acc[j - 1] + Cartesian3.distance(ground[j - 1], ground[j]));
+        const total = acc[n - 1] || 1;
+        const sd = clampDepth(p.sd), ed = clampDepth(p.ed);
 
-      // 管中心高度（公尺，地表 = 0）
-      const centerZ = (j: number) => {
-        if (heightMode === 'z') return p.coords[j][2];
-        const d = sd + (ed - sd) * (acc[j] / total);
-        return heightMode === 'depth-top' ? -(d + r) : -d;
-      };
-      const pos = p.coords.map(([lng, lat], j) => Cartesian3.fromDegrees(lng, lat, centerZ(j) * k));
+        // 管中心高度（公尺，地表 = 0）
+        const centerZ = (j: number) => {
+          if (heightMode === 'z') return p.coords[j][2];
+          const d = sd + (ed - sd) * (acc[j] / total);
+          return heightMode === 'depth-top' ? -(d + r) : -d;
+        };
+        const pos = p.coords.map(([lng, lat], j) => Cartesian3.fromDegrees(lng, lat, centerZ(j) * k));
 
-      for (let j = 0; j < n - 1; j++) {
-        const dir = Cartesian3.subtract(pos[j + 1], pos[j], new Cartesian3());
-        const len = Cartesian3.magnitude(dir);
-        if (len < 1e-3) continue;
-        Cartesian3.divideByScalar(dir, len, dir);
-        const mid = Cartesian3.midpoint(pos[j], pos[j + 1], new Cartesian3());
-        instances.push(
-          new GeometryInstance({
-            geometry: new CylinderGeometry({
-              length: len,
-              topRadius: r * k,
-              bottomRadius: r * k,
-              slices: CYLINDER_SLICES,
-              vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
+        for (let j = 0; j < n - 1; j++) {
+          const dir = Cartesian3.subtract(pos[j + 1], pos[j], new Cartesian3());
+          const len = Cartesian3.magnitude(dir);
+          if (len < 1e-3) continue;
+          Cartesian3.divideByScalar(dir, len, dir);
+          const mid = Cartesian3.midpoint(pos[j], pos[j + 1], new Cartesian3());
+          instances.push(
+            new GeometryInstance({
+              geometry: new CylinderGeometry({
+                length: len,
+                topRadius: r * k,
+                bottomRadius: r * k,
+                slices: CYLINDER_SLICES,
+                vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
+              }),
+              modelMatrix: Matrix4.fromRotationTranslation(rotationZTo(dir), mid),
+              attributes: { color },
+              id,
             }),
-            modelMatrix: Matrix4.fromRotationTranslation(rotationZTo(dir), mid),
-            attributes: { color },
-            id: { gid: p.gid },
-          }),
-        );
+          );
+        }
       }
     }
 
