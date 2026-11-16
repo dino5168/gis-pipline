@@ -38,6 +38,7 @@ import { MATERIALS, OTHER_CODE, OTHER_MATERIAL } from '../pipeStyle';
 import { metersPerPixel, zoomFromMetersPerPixel } from '../cameraScale';
 import { MAP_MAX_PITCH, PIPE3D_MAX_DEPTH, PIPE3D_MAX_SPAN, TAIPEI_CENTER } from '../../config';
 import type { CameraView } from '../../types/view';
+import type { Bbox } from './loadArea';
 import type { Pipe3D, Pipe3DOptions, SectionMode } from '../../types/pipe3d';
 import { PIPE_KINDS, type PipeColorMode, type PipeKindId } from '../../types/pipeKind';
 
@@ -140,7 +141,12 @@ export class CesiumScene {
   readonly viewer: Viewer;
   private basemapLayer: ImageryLayer | null = null;
   private readonly overlayLayers = new Map<OverlayId, ImageryLayer>();
-  private pipesPrimitive: Primitive | null = null;
+  /** 各管線種類一個 Primitive（關閉的種類只隱藏，不重建） */
+  private readonly primitives = new Map<PipeKindId, Primitive>();
+  /** 需要重建的種類（關閉中的種類等到打開時才建） */
+  private readonly dirty = new Set<PipeKindId>();
+  /** 被取代、等新版 ready 才移除的 Primitive */
+  private readonly stale = new Map<PipeKindId, Primitive[]>();
   /** 各管線種類已載入的資料（關閉的種類保留資料，只是不畫） */
   private readonly pipes = new Map<PipeKindId, Pipe3D[]>();
   private options: Pipe3DOptions;
@@ -167,6 +173,9 @@ export class CesiumScene {
       infoBox: false,
       selectionIndicator: false,
       scene3DOnly: true,
+      // 只在有變化（鏡頭移動、圖磚載入、呼叫 requestRender）時才重畫，靜止時不佔 GPU
+      requestRenderMode: true,
+      maximumRenderTimeChange: Infinity,
     });
     const { scene } = this.viewer;
     scene.globe.baseColor = Color.fromCssColorString('#f6f8fa');
@@ -183,9 +192,20 @@ export class CesiumScene {
     if (!this.viewer.isDestroyed()) this.viewer.destroy();
   }
 
+  private requestRender() {
+    this.viewer.scene.requestRender();
+  }
+
   /** 隱藏時停止繪製迴圈，節省 GPU */
   setVisible(visible: boolean) {
     this.viewer.useDefaultRenderLoop = visible;
+    if (visible) this.requestRender();
+  }
+
+  /** 左上角顯示 FPS（效能量測用；靜止時不重畫，數字會停在最後一次） */
+  setShowFps(show: boolean) {
+    this.viewer.scene.debugShowFramesPerSecond = show;
+    this.requestRender();
   }
 
   // ---------------- 圖層
@@ -201,6 +221,7 @@ export class CesiumScene {
     if (!src) return;
     this.basemapLayer = rasterLayer(src);
     this.imagery.add(this.basemapLayer, 0); // 永遠在最下層
+    this.requestRender();
   }
 
   setOverlays(enabled: ReadonlySet<OverlayId>, opacity: number) {
@@ -215,6 +236,7 @@ export class CesiumScene {
       layer.show = enabled.has(id);
       layer.alpha = opacity;
     }
+    this.requestRender();
   }
 
   /** 地面不透明度：小於 1 時地面半透明，才看得到地面下的管線 */
@@ -222,6 +244,7 @@ export class CesiumScene {
     const t = this.viewer.scene.globe.translucency;
     t.enabled = alpha < 1;
     t.frontFaceAlpha = alpha;
+    this.requestRender();
   }
 
   // ---------------- 視角
@@ -300,50 +323,158 @@ export class CesiumScene {
     };
   }
 
+  // ---------------- 導覽控制（右上角的軸向控制項）
+
+  /** 每次畫面更新後若鏡頭有變動就通知（含鏡頭在地面下）；回傳取消函式 */
+  onCameraChange(cb: () => void): () => void {
+    const last = new Matrix4();
+    return this.viewer.scene.postRender.addEventListener(() => {
+      const m = this.viewer.camera.viewMatrix;
+      if (Matrix4.equalsEpsilon(m, last, 1e-9)) return;
+      Matrix4.clone(m, last);
+      cb();
+    });
+  }
+
+  /**
+   * 環繞中心：畫面中心看到的地面點；沒看到地面（看天空、或鏡頭在地面下往下看）時，
+   * 取視線上離鏡頭一段距離的點。
+   */
+  private orbitTarget(): Cartesian3 {
+    const { camera, canvas, globe } = this.viewer.scene;
+    const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+    const ray = camera.getPickRay(new Cartesian2(w / 2, h / 2));
+    if (ray) {
+      const hit = IntersectionTests.rayEllipsoid(ray, globe.ellipsoid);
+      if (hit) return Ray.getPoint(ray, hit.start > 0 ? hit.start : hit.stop);
+    }
+    const dist = Math.max(Math.abs(camera.positionCartographic.height), 100);
+    return Cartesian3.add(
+      camera.positionWC,
+      Cartesian3.multiplyByScalar(camera.directionWC, dist, new Cartesian3()),
+      new Cartesian3(),
+    );
+  }
+
+  /** 以環繞中心為準，把鏡頭放到指定的方位（弧度）、俯仰（弧度，負值往下看）與距離 */
+  private lookAtTarget(target: Cartesian3, heading: number, pitch: number, range: number) {
+    const { camera } = this.viewer;
+    camera.lookAt(target, new HeadingPitchRange(heading, pitch, range));
+    camera.lookAtTransform(Matrix4.IDENTITY); // 解除鎖定，恢復自由操作
+    this.viewer.scene.requestRender();
+  }
+
+  /**
+   * 東(X)、北(Y)、上(Z) 三個軸在畫面上的方向：x 向右、y 向上（單位向量投影，長度 ≤ 1），
+   * depth > 0 表示軸指向遠離觀看者。
+   */
+  axesOnScreen(): Record<'x' | 'y' | 'z', { x: number; y: number; depth: number }> {
+    const { camera } = this.viewer;
+    const enu = Transforms.eastNorthUpToFixedFrame(this.orbitTarget());
+    const axis = (unit: Cartesian3) => {
+      const a = Matrix4.multiplyByPointAsVector(enu, unit, new Cartesian3());
+      return {
+        x: Cartesian3.dot(a, camera.rightWC),
+        y: Cartesian3.dot(a, camera.upWC),
+        depth: Cartesian3.dot(a, camera.directionWC),
+      };
+    };
+    return { x: axis(Cartesian3.UNIT_X), y: axis(Cartesian3.UNIT_Y), z: axis(Cartesian3.UNIT_Z) };
+  }
+
+  /** 繞環繞中心旋轉：dHeading 向右轉、dPitch 往上抬（弧度）。俯仰限制在正上方到正下方之間 */
+  orbit(dHeading: number, dPitch: number) {
+    const { camera } = this.viewer;
+    const target = this.orbitTarget();
+    const range = Cartesian3.distance(camera.positionWC, target);
+    const limit = CesiumMath.toRadians(89.9);
+    const pitch = Math.min(Math.max(camera.pitch + dPitch, -limit), limit);
+    this.lookAtTarget(target, camera.heading + dHeading, pitch, range);
+  }
+
+  /**
+   * 從某個軸向看向環繞中心（距離不變）：
+   * +Z 正上方俯視、-Z 正下方仰視；±X 從東／西側、±Y 從北／南側水平看。
+   */
+  viewFromAxis(axis: 'x' | 'y' | 'z', positive: boolean) {
+    const { camera } = this.viewer;
+    const target = this.orbitTarget();
+    const range = Cartesian3.distance(camera.positionWC, target);
+    const right = CesiumMath.PI_OVER_TWO;
+    if (axis === 'z') {
+      // 俯視／仰視保留目前方位
+      this.lookAtTarget(target, camera.heading, positive ? -right + 1e-4 : right - 1e-4, range);
+      return;
+    }
+    // 鏡頭在 +X（東）側要朝西看，方位 270°；以此類推
+    const heading = axis === 'x' ? (positive ? 3 * right : right) : positive ? Math.PI : 0;
+    this.lookAtTarget(target, heading, 0, range);
+  }
+
+  /** 朝環繞中心拉近（factor < 1）或拉遠（factor > 1） */
+  zoomBy(factor: number) {
+    const { camera } = this.viewer;
+    const target = this.orbitTarget();
+    const range = Cartesian3.distance(camera.positionWC, target);
+    this.lookAtTarget(target, camera.heading, camera.pitch, Math.max(range * factor, 1));
+  }
+
   /** 鏡頭停止移動時通知；回傳取消函式 */
   onMoveEnd(cb: () => void): () => void {
     return this.viewer.camera.moveEnd.addEventListener(cb);
   }
 
-  /** 載入 3D 管線用的範圍：畫面可見範圍，以中心為準限制在 PIPE3D_MAX_SPAN 內 */
-  loadBbox(center: CameraView): string {
-    const half = PIPE3D_MAX_SPAN / 2 - 1e-6;
-    let w = center.lng - half, e = center.lng + half, s = center.lat - half, n = center.lat + half;
+  /** 畫面可見範圍 [west, south, east, north]（度）；取不到時以中心為準取 PIPE3D_MAX_SPAN */
+  viewBbox(center: CameraView): Bbox {
+    const half = PIPE3D_MAX_SPAN / 2;
     const r = this.viewer.camera.computeViewRectangle();
-    if (r) {
-      w = Math.max(w, CesiumMath.toDegrees(r.west));
-      e = Math.min(e, CesiumMath.toDegrees(r.east));
-      s = Math.max(s, CesiumMath.toDegrees(r.south));
-      n = Math.min(n, CesiumMath.toDegrees(r.north));
-    }
-    return [w, s, e, n].map((x) => x.toFixed(6)).join(',');
+    if (!r) return [center.lng - half, center.lat - half, center.lng + half, center.lat + half];
+    return [r.west, r.south, r.east, r.north].map((x) => CesiumMath.toDegrees(x)) as Bbox;
   }
 
   // ---------------- 3D 管線
 
   setPipes(kind: PipeKindId, pipes: Pipe3D[]) {
     this.pipes.set(kind, pipes);
-    if (this.kinds.has(kind)) this.rebuild();
+    this.dirty.add(kind);
+    this.sync();
   }
 
   setKinds(kinds: ReadonlySet<PipeKindId>) {
     this.kinds = kinds;
-    this.rebuild();
+    this.sync();
   }
 
   setColorMode(mode: PipeColorMode) {
     this.colorMode = mode;
-    this.rebuild();
+    this.markAllDirty();
   }
 
   setPipeOptions(options: Pipe3DOptions) {
     this.options = options;
-    this.rebuild();
+    this.markAllDirty();
   }
 
   setMaterials(materials: ReadonlySet<string>) {
     this.materials = materials;
-    this.rebuild();
+    this.markAllDirty();
+  }
+
+  private markAllDirty() {
+    for (const kind of this.pipes.keys()) this.dirty.add(kind);
+    this.sync();
+  }
+
+  /** 開啟的種類：需要時重建；關閉的種類：只隱藏 */
+  private sync() {
+    for (const [kind, prim] of this.primitives) prim.show = this.kinds.has(kind);
+    for (const [kind, prims] of this.stale) for (const prim of prims) prim.show = this.kinds.has(kind);
+    for (const kind of [...this.dirty]) {
+      if (!this.kinds.has(kind)) continue;
+      this.dirty.delete(kind);
+      this.rebuild(kind);
+    }
+    this.requestRender();
   }
 
   private materialShown(mat: string | null): boolean {
@@ -356,99 +487,132 @@ export class CesiumScene {
   }
 
   /**
-   * 依資料、選項、種類、材料篩選重建所有管段，合成一個 Primitive。
+   * 依資料、選項、材料篩選重建一種管線的所有管段，合成一個 Primitive。
    * 每一段折線：外包絡模式一個圓柱或方塊；多條小管模式每條小管一個圓柱。
+   * 新的 Primitive 在背景（Web Worker）建好之前，舊的繼續顯示，避免閃爍。
    */
-  private rebuild() {
-    const primitives = this.viewer.scene.primitives;
-    if (this.pipesPrimitive) primitives.remove(this.pipesPrimitive); // remove 會一併 destroy
-    this.pipesPrimitive = null;
+  private rebuild(kind: PipeKindId) {
+    const instances = this.buildInstances(kind, this.pipes.get(kind) ?? []);
+    const next =
+      instances.length > 0
+        ? new Primitive({
+            geometryInstances: instances,
+            appearance: new PerInstanceColorAppearance({ translucent: false, closed: true }),
+          })
+        : null;
+    this.swapPrimitive(kind, next);
+  }
 
+  /**
+   * 換上新的 Primitive：舊的先留著，等最新的 ready 後才移除（requestRenderMode 下要主動要求重畫來推進建置）。
+   * 連續重建時中間版本可能還沒 ready 就被取代，一律收進 stale 等最新的 ready 再一起移除。
+   */
+  private swapPrimitive(kind: PipeKindId, next: Primitive | null) {
+    const { scene } = this.viewer;
+    const stale = this.stale.get(kind) ?? [];
+    const prev = this.primitives.get(kind);
+    if (prev) stale.push(prev);
+    const clear = () => {
+      for (const old of stale) if (!old.isDestroyed()) scene.primitives.remove(old); // remove 會一併 destroy
+      this.stale.delete(kind);
+      scene.requestRender();
+    };
+    if (!next) {
+      this.primitives.delete(kind);
+      clear();
+      return;
+    }
+    this.stale.set(kind, stale);
+    this.primitives.set(kind, next);
+    next.show = this.kinds.has(kind);
+    scene.primitives.add(next);
+    const tick = () => {
+      if (this.viewer.isDestroyed() || this.primitives.get(kind) !== next) return; // 已被更新的版本取代
+      if (!next.ready) {
+        scene.requestRender();
+        requestAnimationFrame(tick);
+        return;
+      }
+      clear();
+    };
+    tick();
+  }
+
+  private buildInstances(kind: PipeKindId, pipes: Pipe3D[]): GeometryInstance[] {
     const { heightMode, section: sectionMode, exaggeration: k } = this.options;
     const instances: GeometryInstance[] = [];
 
-    for (const [kind, pipes] of this.pipes) {
-      if (!this.kinds.has(kind)) continue;
-      for (const p of pipes) {
-        const n = p.coords.length;
-        if (n < 2 || !this.materialShown(p.mat)) continue;
-        const sec = sectionOf(p);
-        const half = halfHeight(sec, sectionMode);
-        const color = ColorGeometryInstanceAttribute.fromColor(this.pipeColor(kind, p.mat));
-        const id: PipePickId = { layer: kind, gid: p.gid };
+    for (const p of pipes) {
+      const n = p.coords.length;
+      if (n < 2 || !this.materialShown(p.mat)) continue;
+      const sec = sectionOf(p);
+      const half = halfHeight(sec, sectionMode);
+      const color = ColorGeometryInstanceAttribute.fromColor(this.pipeColor(kind, p.mat));
+      const id: PipePickId = { layer: kind, gid: p.gid };
 
-        // 沿線累積水平長度（埋深由起點內插到終點）
-        const ground = p.coords.map(([lng, lat]) => Cartesian3.fromDegrees(lng, lat, 0));
-        const acc = [0];
-        for (let j = 1; j < n; j++) acc.push(acc[j - 1] + Cartesian3.distance(ground[j - 1], ground[j]));
-        const total = acc[n - 1] || 1;
-        const sd = clampDepth(p.sd), ed = clampDepth(p.ed);
+      // 沿線累積水平長度（埋深由起點內插到終點）
+      const ground = p.coords.map(([lng, lat]) => Cartesian3.fromDegrees(lng, lat, 0));
+      const acc = [0];
+      for (let j = 1; j < n; j++) acc.push(acc[j - 1] + Cartesian3.distance(ground[j - 1], ground[j]));
+      const total = acc[n - 1] || 1;
+      const sd = clampDepth(p.sd), ed = clampDepth(p.ed);
 
-        // 管中心高度（公尺，地表 = 0）
-        const centerZ = (j: number) => {
-          if (heightMode === 'z') return p.coords[j][2];
-          const d = sd + (ed - sd) * (acc[j] / total);
-          return heightMode === 'depth-top' ? -(d + half) : -d;
-        };
-        const pos = p.coords.map(([lng, lat], j) => Cartesian3.fromDegrees(lng, lat, centerZ(j) * k));
+      // 管中心高度（公尺，地表 = 0）
+      const centerZ = (j: number) => {
+        if (heightMode === 'z') return p.coords[j][2];
+        const d = sd + (ed - sd) * (acc[j] / total);
+        return heightMode === 'depth-top' ? -(d + half) : -d;
+      };
+      const pos = p.coords.map(([lng, lat], j) => Cartesian3.fromDegrees(lng, lat, centerZ(j) * k));
 
-        for (let j = 0; j < n - 1; j++) {
-          const dir = Cartesian3.subtract(pos[j + 1], pos[j], new Cartesian3());
-          const len = Cartesian3.magnitude(dir);
-          if (len < 1e-3) continue;
-          Cartesian3.divideByScalar(dir, len, dir);
-          const mid = Cartesian3.midpoint(pos[j], pos[j + 1], new Cartesian3());
-          const rot = segmentFrame(mid, dir);
-          const add = (geometry: CylinderGeometry | BoxGeometry, center: Cartesian3) =>
-            instances.push(
-              new GeometryInstance({
-                geometry,
-                modelMatrix: Matrix4.fromRotationTranslation(rot, center),
-                attributes: { color },
-                id,
+      for (let j = 0; j < n - 1; j++) {
+        const dir = Cartesian3.subtract(pos[j + 1], pos[j], new Cartesian3());
+        const len = Cartesian3.magnitude(dir);
+        if (len < 1e-3) continue;
+        Cartesian3.divideByScalar(dir, len, dir);
+        const mid = Cartesian3.midpoint(pos[j], pos[j + 1], new Cartesian3());
+        const rot = segmentFrame(mid, dir);
+        const add = (geometry: CylinderGeometry | BoxGeometry, center: Cartesian3) =>
+          instances.push(
+            new GeometryInstance({
+              geometry,
+              modelMatrix: Matrix4.fromRotationTranslation(rot, center),
+              attributes: { color },
+              id,
+            }),
+          );
+        const cylinder = (dia: number) =>
+          new CylinderGeometry({
+            length: len,
+            topRadius: (dia / 2) * k,
+            bottomRadius: (dia / 2) * k,
+            slices: CYLINDER_SLICES,
+            vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
+          });
+
+        if (sectionMode === 'box') {
+          if (sec.round) add(cylinder(Math.max(sec.w, sec.h)), mid);
+          else
+            add(
+              BoxGeometry.fromDimensions({
+                dimensions: new Cartesian3(sec.w * k, sec.h * k, len),
+                vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
               }),
+              mid,
             );
-          const cylinder = (dia: number) =>
-            new CylinderGeometry({
-              length: len,
-              topRadius: (dia / 2) * k,
-              bottomRadius: (dia / 2) * k,
-              slices: CYLINDER_SLICES,
-              vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
-            });
-
-          if (sectionMode === 'box') {
-            if (sec.round) add(cylinder(Math.max(sec.w, sec.h)), mid);
-            else
-              add(
-                BoxGeometry.fromDimensions({
-                  dimensions: new Cartesian3(sec.w * k, sec.h * k, len),
-                  vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
-                }),
-                mid,
-              );
-            continue;
-          }
-          // 多條小管：在斷面上排成 cols × rows 的格子，由左上開始填
-          const cw = sec.w / sec.cols, ch = sec.h / sec.rows;
-          for (let i = 0; i < sec.count; i++) {
-            const col = i % sec.cols, row = Math.floor(i / sec.cols);
-            const local = new Cartesian3((col - (sec.cols - 1) / 2) * cw * k, ((sec.rows - 1) / 2 - row) * ch * k, 0);
-            const offset = Matrix3.multiplyByVector(rot, local, local);
-            add(cylinder(sec.cd), Cartesian3.add(mid, offset, offset));
-          }
+          continue;
+        }
+        // 多條小管：在斷面上排成 cols × rows 的格子，由左上開始填
+        const cw = sec.w / sec.cols, ch = sec.h / sec.rows;
+        for (let i = 0; i < sec.count; i++) {
+          const col = i % sec.cols, row = Math.floor(i / sec.cols);
+          const local = new Cartesian3((col - (sec.cols - 1) / 2) * cw * k, ((sec.rows - 1) / 2 - row) * ch * k, 0);
+          const offset = Matrix3.multiplyByVector(rot, local, local);
+          add(cylinder(sec.cd), Cartesian3.add(mid, offset, offset));
         }
       }
     }
 
-    if (instances.length > 0) {
-      this.pipesPrimitive = primitives.add(
-        new Primitive({
-          geometryInstances: instances,
-          appearance: new PerInstanceColorAppearance({ translucent: false, closed: true }),
-        }),
-      );
-    }
-    this.viewer.scene.requestRender();
+    return instances;
   }
 }

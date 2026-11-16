@@ -18,6 +18,8 @@ export const PIPE3D_LIMIT = 5000;
 export const PIPE3D_MAX_DEPTH = 30;
 /** 3D 管線：與 API 的 PIPES3D_MAX_SPAN 一致（度），載入範圍以畫面中心為準限制在此跨度內 */
 export const PIPE3D_MAX_SPAN = 0.1;
+/** 3D 管線：載入範圍比畫面四周各多出畫面寬高的這個倍數，畫面還在範圍內就不重抓 */
+export const PIPE3D_LOAD_MARGIN = 0.25;
 
 /** Cesium 靜態檔（Workers、Assets…）的位址，由 vite.config.ts 複製到建置輸出的 cesium/ */
 export const CESIUM_BASE_URL = `${import.meta.env.BASE_URL}cesium/`;

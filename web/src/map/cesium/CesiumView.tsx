@@ -5,7 +5,9 @@ import type { BasemapId } from '../basemaps';
 import type { OverlayId } from '../overlays';
 import type { Pipe3DOptions, Pipe3DStatus, Pipes3DResponse } from '../../types/pipe3d';
 import type { CesiumScene } from './CesiumScene';
+import { bboxParam, covers, loadArea, visibleArea, type LoadedArea } from './loadArea';
 import { ScaleBar } from '../../components/ScaleBar';
+import { Navigation3D } from '../../components/Navigation3D';
 import { metersPerPixel } from '../cameraScale';
 import { setPointerLngLat } from '../pointerCoord';
 import type { ScaleBarSettings } from '../../types/scaleBar';
@@ -29,6 +31,8 @@ interface Props {
   pipe3dOptions: Pipe3DOptions;
   /** 地面不透明度 0～1 */
   groundOpacity: number;
+  /** 左上角顯示 FPS（效能量測用） */
+  showFps: boolean;
   scaleBar: ScaleBarSettings;
   onStatus: (s: Pipe3DStatus) => void;
   /** 場景建立完成（或卸載時傳 null），供上層做視角同步 */
@@ -81,6 +85,7 @@ export function CesiumView(p: Props) {
   useEffect(() => scene?.setBasemap(p.basemap), [scene, p.basemap]);
   useEffect(() => scene?.setOverlays(p.overlays, p.overlayOpacity), [scene, p.overlays, p.overlayOpacity]);
   useEffect(() => scene?.setGroundOpacity(p.groundOpacity), [scene, p.groundOpacity]);
+  useEffect(() => scene?.setShowFps(p.showFps), [scene, p.showFps]);
 
   // ---- 管線選項、材料篩選
   useEffect(() => scene?.setPipeOptions(p.pipe3dOptions), [scene, p.pipe3dOptions]);
@@ -88,8 +93,8 @@ export function CesiumView(p: Props) {
   useEffect(() => scene?.setKinds(p.enabledKinds), [scene, p.enabledKinds]);
   useEffect(() => scene?.setColorMode(p.colorMode), [scene, p.colorMode]);
 
-  // 各種類最後載入的範圍（關閉再打開時，範圍沒變就不重抓）
-  const loadedBbox = useRef(new Map<PipeKindId, string>());
+  // 各種類已載入的範圍（畫面還在範圍內就不重抓；關閉再打開時也沿用）
+  const loadedArea = useRef(new Map<PipeKindId, LoadedArea>());
   const loadedResult = useRef(new Map<PipeKindId, { count: number; truncated: boolean }>());
 
   // ---- 比例尺：畫面中心的地面解析度（鏡頭傾斜時只代表畫面中心附近）
@@ -133,19 +138,25 @@ export function CesiumView(p: Props) {
       const view = scene.getView();
       if (!view) return; // 鏡頭在地面下：保留目前的管線
       if (view.zoom < PIPE3D_MIN_ZOOM) return status({ kind: 'zoom-in', minZoom: PIPE3D_MIN_ZOOM });
-      const bbox = scene.loadBbox(view);
-      const todo = kinds.filter((k) => loadedBbox.current.get(k) !== bbox);
+      const center: [number, number] = [view.lng, view.lat];
+      const viewBbox = scene.viewBbox(view);
+      const visible = visibleArea(viewBbox, center);
+      const todo = kinds.filter((k) => {
+        const area = loadedArea.current.get(k);
+        return !area || !covers(area, visible, center);
+      });
       if (todo.length === 0) return status(summary());
+      const bbox = loadArea(viewBbox, center);
       status({ kind: 'loading' });
       try {
         await Promise.all(
           todo.map(async (k) => {
-            const url = `/api/pipes3d?bbox=${bbox}&limit=${PIPE3D_LIMIT}&layer=${k}`;
+            const url = `/api/pipes3d?bbox=${bboxParam(bbox)}&limit=${PIPE3D_LIMIT}&layer=${k}`;
             const res = await fetch(url, { signal: abort.signal });
             if (!res.ok) throw new Error(`API 回應 ${res.status}`);
             const data = (await res.json()) as Pipes3DResponse;
             if (abort.signal.aborted) return;
-            loadedBbox.current.set(k, bbox);
+            loadedArea.current.set(k, { bbox, center, truncated: data.truncated });
             loadedResult.current.set(k, { count: data.pipes.length, truncated: data.truncated });
             scene.setPipes(k, data.pipes);
           }),
@@ -169,6 +180,7 @@ export function CesiumView(p: Props) {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
       <ScaleBar settings={p.scaleBar} metersPerPixel={mpp} />
+      {scene && <Navigation3D scene={scene} />}
     </div>
   );
 }

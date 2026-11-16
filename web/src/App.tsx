@@ -106,6 +106,7 @@ export default function App() {
   const [section, setSection] = useState<SectionMode>('box');
   const [exaggeration, setExaggeration] = useState(5);
   const [groundOpacity, setGroundOpacity] = useState(GROUND_OPACITY_DEFAULT);
+  const [showFps, setShowFps] = useState(false);
   const [pipe3dStatus, setPipe3dStatus] = useState<Pipe3DStatus>({ kind: 'off' });
   const [scaleBar, setScaleBar] = useState<ScaleBarSettings>(loadScaleBar);
   const [scaleSettingsOpen, setScaleSettingsOpen] = useState(false);
@@ -202,6 +203,8 @@ export default function App() {
         onExaggerationChange={setExaggeration}
         groundOpacity={groundOpacity}
         onGroundOpacityChange={setGroundOpacity}
+        showFps={showFps}
+        onShowFpsChange={setShowFps}
         status={pipe3dStatus}
       />
       <ScaleBarSettingsDrawer
@@ -248,6 +251,7 @@ export default function App() {
                 colorMode={colorMode}
                 pipe3dOptions={pipe3dOptions}
                 groundOpacity={groundOpacity}
+                showFps={showFps}
                 scaleBar={scaleBar}
                 onStatus={setPipe3dStatus}
                 onReady={setScene}

@@ -19,6 +19,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 
 interface Props {
   open: boolean;
@@ -32,6 +33,9 @@ interface Props {
   /** 地面不透明度 0～1 */
   groundOpacity: number;
   onGroundOpacityChange: (v: number) => void;
+  /** 左上角顯示 FPS（效能量測用） */
+  showFps: boolean;
+  onShowFpsChange: (v: boolean) => void;
   status: Pipe3DStatus;
 }
 
@@ -95,6 +99,12 @@ export function Pipe3DSettingsDrawer(p: Props) {
           <div className="space-y-2">
             <Label className={SECTION_LABEL}>地面不透明度 {Math.round(p.groundOpacity * 100)}%</Label>
             <Slider min={0} max={1} step={0.05} value={[p.groundOpacity]} onValueChange={([v]) => p.onGroundOpacityChange(v)} />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="pipe3d-fps" className={SECTION_LABEL}>
+              顯示 FPS（效能量測，畫面靜止時不更新）
+            </Label>
+            <Switch id="pipe3d-fps" checked={p.showFps} onCheckedChange={p.onShowFpsChange} />
           </div>
           <div className="text-muted-foreground text-xs">
             左鍵拖曳平移、右鍵拖曳或滾輪縮放、中鍵（或 Ctrl＋左鍵）拖曳旋轉傾斜；可以把鏡頭移到地面下。
