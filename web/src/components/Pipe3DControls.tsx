@@ -1,13 +1,19 @@
 import { Box, TriangleAlert } from 'lucide-react';
 import { HEIGHT_MODE_LABELS, type HeightMode, type Pipe3DStatus } from '../types/pipe3d';
+import { PanelSection, WARNING_ALERT } from './PanelSection';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
 
 interface Props {
-  view3d: boolean;
-  onView3dChange: (on: boolean) => void;
   heightMode: HeightMode;
   onHeightModeChange: (m: HeightMode) => void;
   exaggeration: number;
   onExaggerationChange: (k: number) => void;
+  /** 地面不透明度 0～1 */
+  groundOpacity: number;
+  onGroundOpacityChange: (v: number) => void;
   status: Pipe3DStatus;
 }
 
@@ -16,72 +22,80 @@ function StatusLine({ status }: { status: Pipe3DStatus }) {
     case 'off':
       return null;
     case 'loading':
-      return <div className="text-muted mt-1.5">載入中…</div>;
+      return <div className="text-muted-foreground text-xs">載入中…</div>;
     case 'zoom-in':
       return (
-        <div className="mt-1.5 rounded bg-yellow-100 px-2 py-1 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-200">
-          放大到縮放等級 {status.minZoom} 以上才會載入 3D 管線。
-        </div>
+        <Alert className={WARNING_ALERT}>
+          <AlertDescription className="text-inherit">
+            放大到縮放等級 {status.minZoom} 以上才會載入 3D 管線。
+          </AlertDescription>
+        </Alert>
       );
     case 'ready':
       return (
-        <div className="text-muted mt-1.5">
+        <div className="text-muted-foreground text-xs">
           已載入 {status.count.toLocaleString()} 條管線
           {status.truncated && '（已達上限，只顯示離畫面中心較近的部分）'}
         </div>
       );
     case 'error':
       return (
-        <div className="mt-1.5 flex gap-1.5 rounded bg-red-50 px-2 py-1 text-red-900 dark:bg-red-950 dark:text-red-200">
-          <TriangleAlert size={14} className="mt-0.5 flex-none" />
-          <span>{status.message}</span>
-        </div>
+        <Alert variant="destructive">
+          <TriangleAlert />
+          <AlertDescription>{status.message}</AlertDescription>
+        </Alert>
       );
   }
 }
 
 export function Pipe3DControls(p: Props) {
   return (
-    <>
-      <h2 className="section-title">
-        <Box size={13} /> 3D 檢視
-      </h2>
-      <label className="flex cursor-pointer items-center gap-1.5">
-        <input type="checkbox" checked={p.view3d} onChange={(e) => p.onView3dChange(e.target.checked)} />
-        顯示 3D 管線（地面下）
-      </label>
-      {p.view3d && (
-        <div className="mt-1.5 space-y-1.5">
-          <label className="block">
-            <span className="text-muted text-xs">高度依據</span>
-            <select
-              className="field mt-0.5 w-full p-1"
-              value={p.heightMode}
-              onChange={(e) => p.onHeightModeChange(e.target.value as HeightMode)}
-            >
+    <PanelSection icon={<Box />} title="3D 檢視（Cesium）">
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <Label className="text-muted-foreground text-xs font-normal">高度依據</Label>
+          <Select value={p.heightMode} onValueChange={(v) => p.onHeightModeChange(v as HeightMode)}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper">
               {(Object.keys(HEIGHT_MODE_LABELS) as HeightMode[]).map((m) => (
-                <option key={m} value={m}>
+                <SelectItem key={m} value={m}>
                   {HEIGHT_MODE_LABELS[m]}
-                </option>
+                </SelectItem>
               ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-muted text-xs">垂直／管徑放大 ×{p.exaggeration}</span>
-            <input
-              type="range"
-              className="w-full"
-              min={1}
-              max={20}
-              step={1}
-              value={p.exaggeration}
-              onChange={(e) => p.onExaggerationChange(Number(e.target.value))}
-            />
-          </label>
-          <div className="text-muted text-xs">右鍵拖曳（或 Ctrl＋拖曳）可旋轉、傾斜視角。</div>
+            </SelectContent>
+          </Select>
         </div>
-      )}
+        <div className="space-y-2">
+          <Label className="text-muted-foreground text-xs font-normal">
+            垂直／管徑放大 ×{p.exaggeration}
+          </Label>
+          <Slider
+            min={1}
+            max={20}
+            step={1}
+            value={[p.exaggeration]}
+            onValueChange={([v]) => p.onExaggerationChange(v)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-muted-foreground text-xs font-normal">
+            地面不透明度 {Math.round(p.groundOpacity * 100)}%
+          </Label>
+          <Slider
+            min={0}
+            max={1}
+            step={0.05}
+            value={[p.groundOpacity]}
+            onValueChange={([v]) => p.onGroundOpacityChange(v)}
+          />
+        </div>
+        <div className="text-muted-foreground text-xs">
+          左鍵拖曳平移、右鍵拖曳或滾輪縮放、中鍵（或 Ctrl＋左鍵）拖曳旋轉傾斜；可以把鏡頭移到地面下。
+        </div>
+      </div>
       <StatusLine status={p.status} />
-    </>
+    </PanelSection>
   );
 }
