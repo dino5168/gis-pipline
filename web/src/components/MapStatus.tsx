@@ -1,4 +1,4 @@
-import { TriangleAlert, ZoomIn } from 'lucide-react';
+import { LoaderCircle, TriangleAlert, ZoomIn } from 'lucide-react';
 import type { Pipe3DStatus } from '../types/pipe3d';
 import { PIPE_KINDS, type PipeKindId } from '../types/pipeKind';
 import { WARNING_ALERT } from './PanelSection';
@@ -8,13 +8,24 @@ import { Button } from '@/components/ui/button';
 /** 地圖上只提示需要注意的 3D 狀態；一般的「已載入 N 條」只在 3D 顯示設定 Drawer 顯示 */
 const show3dStatus = (s: Pipe3DStatus) => s.kind !== 'off' && (s.kind !== 'ready' || s.truncated);
 
+const LOADING_TEXT = {
+  init: '3D 圖台載入中…',
+  fetch: '3D 管線下載中…',
+  build: '3D 管線建立模型中…',
+} as const;
+
 /** 3D 載入狀態（地圖提示與 3D 顯示設定 Drawer 共用） */
 export function Pipe3DStatusLine({ status }: { status: Pipe3DStatus }) {
   switch (status.kind) {
     case 'off':
       return null;
     case 'loading':
-      return <div className="text-muted-foreground text-xs">3D 管線載入中…</div>;
+      return (
+        <div className="text-foreground flex items-center gap-2 text-xs">
+          <LoaderCircle className="text-primary size-4 shrink-0 animate-spin" />
+          {LOADING_TEXT[status.phase]}
+        </div>
+      );
     case 'zoom-in':
       return (
         <Alert className={WARNING_ALERT}>

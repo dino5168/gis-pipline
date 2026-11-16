@@ -253,6 +253,7 @@ export default function App() {
                 groundOpacity={groundOpacity}
                 showFps={showFps}
                 scaleBar={scaleBar}
+                mapRef={mapRef}
                 onStatus={setPipe3dStatus}
                 onReady={setScene}
               />

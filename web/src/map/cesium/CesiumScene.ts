@@ -478,7 +478,29 @@ export class CesiumScene {
       this.dirty.delete(kind);
       this.rebuild(kind);
     }
+    this.notifyBusy();
     this.requestRender();
+  }
+
+  private readonly busyListeners = new Set<(busy: boolean) => void>();
+  private lastBusy = false;
+
+  /** 是否有開啟中的管線種類正在背景建立 3D 模型（新 Primitive 尚未 ready） */
+  isBusy(): boolean {
+    return [...this.stale.keys()].some((k) => this.kinds.has(k));
+  }
+
+  /** 建立 3D 模型的忙碌狀態改變時通知；回傳取消函式 */
+  onBusyChange(cb: (busy: boolean) => void): () => void {
+    this.busyListeners.add(cb);
+    return () => this.busyListeners.delete(cb);
+  }
+
+  private notifyBusy() {
+    const busy = this.isBusy();
+    if (busy === this.lastBusy) return;
+    this.lastBusy = busy;
+    for (const cb of this.busyListeners) cb(busy);
   }
 
   private materialShown(mat: string | null): boolean {
@@ -519,6 +541,7 @@ export class CesiumScene {
     const clear = () => {
       for (const old of stale) if (!old.isDestroyed()) scene.primitives.remove(old); // remove 會一併 destroy
       this.stale.delete(kind);
+      this.notifyBusy();
       scene.requestRender();
     };
     if (!next) {
@@ -530,6 +553,7 @@ export class CesiumScene {
     this.primitives.set(kind, next);
     next.show = this.kinds.has(kind);
     scene.primitives.add(next);
+    this.notifyBusy();
     const tick = () => {
       if (this.viewer.isDestroyed() || this.primitives.get(kind) !== next) return; // 已被更新的版本取代
       if (!next.ready) {

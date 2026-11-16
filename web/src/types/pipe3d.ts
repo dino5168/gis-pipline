@@ -50,6 +50,7 @@ export interface Pipe3DOptions {
 export type Pipe3DStatus =
   | { kind: 'off' }
   | { kind: 'zoom-in'; minZoom: number }
-  | { kind: 'loading' }
+  /** phase：init＝載入 Cesium、fetch＝向 API 下載管線、build＝建立 3D 模型 */
+  | { kind: 'loading'; phase: 'init' | 'fetch' | 'build' }
   | { kind: 'ready'; count: number; truncated: boolean }
   | { kind: 'error'; message: string };

@@ -1,11 +1,12 @@
 // 3D 圖台（Cesium）：第一次需要時才動態載入 Cesium，之後保持存在（隱藏時停止繪製）。
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import type * as maplibregl from 'maplibre-gl';
 import { CESIUM_BASE_URL, PIPE3D_LIMIT, PIPE3D_MIN_ZOOM } from '../../config';
 import type { BasemapId } from '../basemaps';
 import type { OverlayId } from '../overlays';
 import type { Pipe3DOptions, Pipe3DStatus, Pipes3DResponse } from '../../types/pipe3d';
 import type { CesiumScene } from './CesiumScene';
-import { bboxParam, covers, loadArea, visibleArea, type LoadedArea } from './loadArea';
+import { bboxParam, clampSpan, covers, type LoadedArea } from './loadArea';
 import { ScaleBar } from '../../components/ScaleBar';
 import { Navigation3D } from '../../components/Navigation3D';
 import { metersPerPixel } from '../cameraScale';
@@ -34,6 +35,8 @@ interface Props {
   /** 左上角顯示 FPS（效能量測用） */
   showFps: boolean;
   scaleBar: ScaleBarSettings;
+  /** 2D 地圖：3D 管線以 2D 的畫面範圍與縮放等級載入 */
+  mapRef: RefObject<maplibregl.Map | null>;
   onStatus: (s: Pipe3DStatus) => void;
   /** 場景建立完成（或卸載時傳 null），供上層做視角同步 */
   onReady: (scene: CesiumScene | null) => void;
@@ -53,7 +56,7 @@ export function CesiumView(p: Props) {
     let cancelled = false;
     let created: CesiumScene | null = null;
     window.CESIUM_BASE_URL = CESIUM_BASE_URL;
-    latest.current.onStatus({ kind: 'loading' });
+    latest.current.onStatus({ kind: 'loading', phase: 'init' });
     import('./CesiumScene')
       .then(({ CesiumScene }) => {
         if (cancelled || !containerRef.current) return;
@@ -65,7 +68,7 @@ export function CesiumView(p: Props) {
           colorMode: cur.colorMode,
         });
         setScene(created);
-        cur.onStatus({ kind: 'off' });
+        cur.onStatus({ kind: 'off' }); // 顯示中時，下面的載入流程會立刻改成實際狀態
         cur.onReady(created);
       })
       .catch((err: Error) => latest.current.onStatus({ kind: 'error', message: `無法載入 Cesium：${err.message}` }));
@@ -111,14 +114,35 @@ export function CesiumView(p: Props) {
   // ---- 坐標顯示：滑鼠所指地面位置
   useEffect(() => scene?.onPointerMove(setPointerLngLat), [scene]);
 
-  // ---- 鏡頭停止、或勾選的種類改變時，依畫面範圍載入勾選的管線種類
-  const { enabledKinds } = p;
+  // ---- 載入狀態：載入流程的結果（loadStatus）＋背景建立 3D 模型中（busy）→ 顯示「載入中」
+  const loadStatus = useRef<Pipe3DStatus>({ kind: 'off' });
+  const busy = useRef(false);
+  const emitStatus = useCallback(() => {
+    const s = loadStatus.current;
+    latest.current.onStatus(busy.current && s.kind === 'ready' ? { kind: 'loading', phase: 'build' } : s);
+  }, []);
   useEffect(() => {
     if (!scene) return;
+    busy.current = scene.isBusy();
+    return scene.onBusyChange((b) => {
+      busy.current = b;
+      emitStatus();
+    });
+  }, [scene, emitStatus]);
+
+  // ---- 2D 或 3D 停止移動、或勾選的種類改變時，依「2D 畫面範圍」載入勾選的管線種類
+  // （以 2D 為準：3D 顯示的管線與 2D 畫面上的相同；3D 鏡頭移動時 2D 會同步跟著動）
+  const { enabledKinds, visible } = p;
+  useEffect(() => {
+    if (!scene || !visible) return;
     const abort = new AbortController();
-    const status = (s: Pipe3DStatus) => latest.current.onStatus(s);
+    const status = (s: Pipe3DStatus) => {
+      loadStatus.current = s;
+      emitStatus();
+    };
     const kinds = PIPE_KIND_IDS.filter((k) => enabledKinds.has(k));
     let seq = 0;
+    let timer: number | undefined;
 
     const summary = (): Pipe3DStatus => {
       let count = 0, truncated = false;
@@ -135,19 +159,19 @@ export function CesiumView(p: Props) {
     const load = async () => {
       const mine = ++seq;
       if (kinds.length === 0) return status({ kind: 'off' });
-      const view = scene.getView();
-      if (!view) return; // 鏡頭在地面下：保留目前的管線
-      if (view.zoom < PIPE3D_MIN_ZOOM) return status({ kind: 'zoom-in', minZoom: PIPE3D_MIN_ZOOM });
-      const center: [number, number] = [view.lng, view.lat];
-      const viewBbox = scene.viewBbox(view);
-      const visible = visibleArea(viewBbox, center);
+      const map = latest.current.mapRef.current;
+      if (!map) return;
+      if (map.getZoom() < PIPE3D_MIN_ZOOM) return status({ kind: 'zoom-in', minZoom: PIPE3D_MIN_ZOOM });
+      const c = map.getCenter();
+      const center: [number, number] = [c.lng, c.lat];
+      const b = map.getBounds(); // 2D 有旋轉時為外接矩形
+      const bbox = clampSpan([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], center);
       const todo = kinds.filter((k) => {
         const area = loadedArea.current.get(k);
-        return !area || !covers(area, visible, center);
+        return !area || !covers(area, bbox, center);
       });
       if (todo.length === 0) return status(summary());
-      const bbox = loadArea(viewBbox, center);
-      status({ kind: 'loading' });
+      status({ kind: 'loading', phase: 'fetch' });
       try {
         await Promise.all(
           todo.map(async (k) => {
@@ -155,7 +179,7 @@ export function CesiumView(p: Props) {
             const res = await fetch(url, { signal: abort.signal });
             if (!res.ok) throw new Error(`API 回應 ${res.status}`);
             const data = (await res.json()) as Pipes3DResponse;
-            if (abort.signal.aborted) return;
+            if (abort.signal.aborted || mine !== seq) return; // 已有較新的載入
             loadedArea.current.set(k, { bbox, center, truncated: data.truncated });
             loadedResult.current.set(k, { count: data.pipes.length, truncated: data.truncated });
             scene.setPipes(k, data.pipes);
@@ -168,13 +192,22 @@ export function CesiumView(p: Props) {
       }
     };
 
-    const off = scene.onMoveEnd(() => void load());
+    // 2D、3D 的 moveend 可能連續觸發（視角同步），稍等合併成一次
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 150);
+    };
+    const map = latest.current.mapRef.current;
+    const off = scene.onMoveEnd(schedule);
+    map?.on('moveend', schedule);
     void load();
     return () => {
       off();
+      map?.off('moveend', schedule);
+      window.clearTimeout(timer);
       abort.abort();
     };
-  }, [scene, enabledKinds]);
+  }, [scene, enabledKinds, visible, emitStatus]);
 
   return (
     <div className="relative h-full w-full">
