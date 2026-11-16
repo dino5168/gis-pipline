@@ -1,7 +1,4 @@
-import { LandPlot, Layers, Map as MapIcon, TriangleAlert, ZoomIn } from 'lucide-react';
-import { BASEMAPS, BASEMAP_IDS, type BasemapId } from '../map/basemaps';
-import type { OverlayId } from '../map/overlays';
-import { OverlayControls } from './OverlayControls';
+import { Layers, TriangleAlert, ZoomIn } from 'lucide-react';
 import { PIPE_MIN_ZOOM } from '../config';
 import { MaterialLegend } from './MaterialLegend';
 import { Pipe3DControls } from './Pipe3DControls';
@@ -10,19 +7,12 @@ import { PanelSection, WARNING_ALERT } from './PanelSection';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 
 interface Props {
   /** 2D／3D 圖台是否顯示中（決定要顯示哪些設定） */
   show2d: boolean;
   show3d: boolean;
-  basemap: BasemapId;
-  onBasemapChange: (id: BasemapId) => void;
-  overlays: ReadonlySet<OverlayId>;
-  onOverlaysChange: (next: Set<OverlayId>) => void;
-  overlayOpacity: number;
-  onOverlayOpacityChange: (v: number) => void;
   enabledMaterials: ReadonlySet<string>;
   onMaterialsChange: (next: Set<string>) => void;
   zoom: number | null;
@@ -46,30 +36,6 @@ export function ControlPanel(p: Props) {
       className="bg-card/95 absolute top-3 left-3 z-40 max-h-[calc(100%-24px)] w-[280px] max-w-[calc(100vw-24px)] overflow-auto shadow-md backdrop-blur-sm max-sm:right-3 max-sm:max-h-[45vh] max-sm:w-auto"
     >
       <CardContent className="space-y-4">
-        <PanelSection icon={<MapIcon />} title="底圖">
-          <Select value={p.basemap} onValueChange={(v) => p.onBasemapChange(v as BasemapId)}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              {BASEMAP_IDS.map((id) => (
-                <SelectItem key={id} value={id}>
-                  {BASEMAPS[id].name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </PanelSection>
-
-        <PanelSection icon={<LandPlot />} title="疊加圖層">
-          <OverlayControls
-            enabled={p.overlays}
-            onChange={p.onOverlaysChange}
-            opacity={p.overlayOpacity}
-            onOpacityChange={p.onOverlayOpacityChange}
-          />
-        </PanelSection>
-
         <PanelSection icon={<Layers />} title="管線材料">
           <MaterialLegend enabled={p.enabledMaterials} onChange={p.onMaterialsChange} />
         </PanelSection>

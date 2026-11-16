@@ -87,7 +87,16 @@ export default function App() {
 
   return (
     <div className="flex h-full w-full flex-col">
-      <AppMenu mode={mode} onModeChange={setMode} />
+      <AppMenu
+        mode={mode}
+        onModeChange={setMode}
+        basemap={basemap}
+        onBasemapChange={setBasemap}
+        overlays={overlays}
+        onOverlaysChange={setOverlays}
+        overlayOpacity={overlayOpacity}
+        onOverlayOpacityChange={setOverlayOpacity}
+      />
       <div className="relative flex min-h-0 flex-1">
         <SplitView
           mode={mode}
@@ -124,12 +133,6 @@ export default function App() {
         <ControlPanel
           show2d={show2d}
           show3d={show3d}
-          basemap={basemap}
-          onBasemapChange={setBasemap}
-          overlays={overlays}
-          onOverlaysChange={setOverlays}
-          overlayOpacity={overlayOpacity}
-          onOverlayOpacityChange={setOverlayOpacity}
           enabledMaterials={enabledMaterials}
           onMaterialsChange={setEnabledMaterials}
           zoom={zoom}
