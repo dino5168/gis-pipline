@@ -254,14 +254,18 @@ export class CesiumScene {
     return f instanceof PerspectiveFrustum && f.fovy !== undefined ? f.fovy : CesiumMath.toRadians(60);
   }
 
-  /** 套用 2D 的視角：畫面中心的地面解析度與 2D 相同 */
-  applyView(v: CameraView) {
+  /**
+   * 套用 2D 的視角：畫面中心的地面解析度與 2D 相同。
+   * keepPitch：保留 3D 目前的傾斜角，不採用 v.pitch（傾斜不從 2D 同步過來）
+   */
+  applyView(v: CameraView, opts?: { keepPitch?: boolean }) {
     const { camera, canvas } = this.viewer.scene;
     const h = canvas.clientHeight || 1;
     const range = (metersPerPixel(v.zoom, v.lat) * h) / (2 * Math.tan(this.fovy / 2));
+    const pitch = opts?.keepPitch ? camera.pitch : CesiumMath.toRadians(v.pitch - 90);
     camera.lookAt(
       Cartesian3.fromDegrees(v.lng, v.lat, 0),
-      new HeadingPitchRange(CesiumMath.toRadians(v.bearing), CesiumMath.toRadians(v.pitch - 90), range),
+      new HeadingPitchRange(CesiumMath.toRadians(v.bearing), pitch, range),
     );
     camera.lookAtTransform(Matrix4.IDENTITY); // 解除鎖定，恢復自由操作
   }

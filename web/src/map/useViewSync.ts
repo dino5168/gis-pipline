@@ -24,14 +24,16 @@ export function useViewSync(
     // 3D 剛建立：先對齊 2D 目前的視角
     scene.applyView(readMapView(map));
 
+    // 傾斜（pitch）不同步：2D 動時 3D 保留自己的傾斜角；3D 傾斜時 2D 不跟著傾斜。
+    // 只同步位置、比例（zoom）與方位（bearing）。
     const onMapMove = () => {
-      if (activeRef.current === '2d') scene.applyView(readMapView(map));
+      if (activeRef.current === '2d') scene.applyView(readMapView(map), { keepPitch: true });
     };
     map.on('move', onMapMove);
 
     const off = scene.onViewChange((v) => {
       if (activeRef.current !== '3d') return;
-      map.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom, bearing: v.bearing, pitch: v.pitch });
+      map.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom, bearing: v.bearing });
     });
 
     return () => {
