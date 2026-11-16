@@ -1,5 +1,11 @@
 import { X } from 'lucide-react';
-import { HEIGHT_MODE_LABELS, type HeightMode, type Pipe3DStatus } from '../types/pipe3d';
+import {
+  HEIGHT_MODE_LABELS,
+  SECTION_MODE_LABELS,
+  type HeightMode,
+  type Pipe3DStatus,
+  type SectionMode,
+} from '../types/pipe3d';
 import { Pipe3DStatusLine } from './MapStatus';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,6 +25,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   heightMode: HeightMode;
   onHeightModeChange: (m: HeightMode) => void;
+  section: SectionMode;
+  onSectionChange: (m: SectionMode) => void;
   exaggeration: number;
   onExaggerationChange: (k: number) => void;
   /** 地面不透明度 0～1 */
@@ -61,6 +69,24 @@ export function Pipe3DSettingsDrawer(p: Props) {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-2">
+            <Label className={SECTION_LABEL}>斷面</Label>
+            <Select value={p.section} onValueChange={(v) => p.onSectionChange(v as SectionMode)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                {(Object.keys(SECTION_MODE_LABELS) as SectionMode[]).map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {SECTION_MODE_LABELS[m]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-xs">
+              有寬×高的管線（電信）以外包絡畫方形；多條小管依共管條數排成格狀。
+            </p>
           </div>
           <div className="space-y-2">
             <Label className={SECTION_LABEL}>垂直／管徑放大 ×{p.exaggeration}</Label>

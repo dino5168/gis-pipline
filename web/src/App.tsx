@@ -14,7 +14,7 @@ import { ALL_MATERIAL_CODES } from './map/pipeStyle';
 import type { BasemapId } from './map/basemaps';
 import type { OverlayId } from './map/overlays';
 import { DATA_BOUNDS, GROUND_OPACITY_DEFAULT, PIPES_CENTER } from './config';
-import type { HeightMode, Pipe3DStatus } from './types/pipe3d';
+import type { HeightMode, Pipe3DStatus, SectionMode } from './types/pipe3d';
 import type { ViewMode } from './types/view';
 import { ScaleBarSettingsDrawer } from './components/ScaleBarSettingsDrawer';
 import { CoordinateDisplay } from './components/CoordinateDisplay';
@@ -103,6 +103,7 @@ export default function App() {
   const [zoom, setZoom] = useState<number | null>(null);
   const [tileError, setTileError] = useState<string | null>(null);
   const [heightMode, setHeightMode] = useState<HeightMode>('depth-top');
+  const [section, setSection] = useState<SectionMode>('box');
   const [exaggeration, setExaggeration] = useState(5);
   const [groundOpacity, setGroundOpacity] = useState(GROUND_OPACITY_DEFAULT);
   const [pipe3dStatus, setPipe3dStatus] = useState<Pipe3DStatus>({ kind: 'off' });
@@ -124,7 +125,7 @@ export default function App() {
       // 無法儲存時忽略
     }
   }, [coordDisplay]);
-  const pipe3dOptions = useMemo(() => ({ heightMode, exaggeration }), [heightMode, exaggeration]);
+  const pipe3dOptions = useMemo(() => ({ heightMode, section, exaggeration }), [heightMode, section, exaggeration]);
 
   // ---- 3D：第一次切到含 3D 的模式才建立 Cesium，之後保留
   const show2d = mode !== '3d';
@@ -195,6 +196,8 @@ export default function App() {
         onOpenChange={setPipe3dSettingsOpen}
         heightMode={heightMode}
         onHeightModeChange={setHeightMode}
+        section={section}
+        onSectionChange={setSection}
         exaggeration={exaggeration}
         onExaggerationChange={setExaggeration}
         groundOpacity={groundOpacity}

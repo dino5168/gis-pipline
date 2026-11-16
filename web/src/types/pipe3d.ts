@@ -3,8 +3,12 @@ export interface Pipe3D {
   gid: number;
   /** 管線材料代碼 */
   mat: string | null;
-  /** 管徑（公尺，已依尺寸單位換算） */
+  /** 管徑／寬度（公尺，已依尺寸單位換算）；有高度時為外包絡寬度，否則為單條管的直徑 */
   dia: number | null;
+  /** 高度（公尺）；null 表示圓管（只有管徑） */
+  h: number | null;
+  /** 共管條數 */
+  n: number | null;
   /** 起點埋設深度（公尺） */
   sd: number | null;
   /** 終點埋設深度（公尺） */
@@ -27,8 +31,17 @@ export const HEIGHT_MODE_LABELS: Record<HeightMode, string> = {
   z: 'Z 值（絕對高程）',
 };
 
+/** 斷面顯示：外包絡（方形，單條圓管仍為圓柱）或依共管條數畫成多條小管 */
+export type SectionMode = 'box' | 'conduits';
+
+export const SECTION_MODE_LABELS: Record<SectionMode, string> = {
+  box: '外包絡（方形斷面）',
+  conduits: '多條小管（依共管條數）',
+};
+
 export interface Pipe3DOptions {
   heightMode: HeightMode;
+  section: SectionMode;
   /** 垂直與管徑的放大倍率 */
   exaggeration: number;
 }

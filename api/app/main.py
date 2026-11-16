@@ -77,7 +77,10 @@ def pipe_detail(gid: int, layer: str = LayerParam) -> dict:
 
 
 # 管徑換算成公尺：size_unit 0=mm、1=英吋、2=cm、3=m（依資料分布推定：0 中位數 200、1 為 1~12、2 為 10~30、3 為 0.1~0.25）
-_DIA_M = "dia_width * CASE size_unit WHEN 1 THEN 0.0254 WHEN 2 THEN 0.01 WHEN 3 THEN 1 ELSE 0.001 END"
+_UNIT_M = "CASE size_unit WHEN 1 THEN 0.0254 WHEN 2 THEN 0.01 WHEN 3 THEN 1 ELSE 0.001 END"
+_DIA_M = f"dia_width * {_UNIT_M}"
+# 管徑高度（公尺）：0 或缺值表示圓管（只有寬度）→ null
+_HEIGHT_M = f"CASE WHEN dia_height > 0 THEN dia_height * {_UNIT_M} END"
 PIPES3D_MAX_SPAN = 0.1  # bbox 最大經緯度跨度（約 10km），避免整個城市一次查
 PIPES3D_MAX_LIMIT = 10000
 
@@ -90,7 +93,8 @@ def pipes_3d(
 ) -> dict:
     """3D 用的精簡管線資料：範圍內的管線，離 bbox 中心近的優先，最多 limit 筆。
 
-    coords 為 [lng, lat, z]（z = 原始 Z 值），dia 為管徑（公尺），sd/ed 為起／終點埋設深度（公尺）。
+    coords 為 [lng, lat, z]（z = 原始 Z 值），dia 為管徑／寬度（公尺），h 為高度（公尺，圓管為 null），
+    n 為共管條數，sd/ed 為起／終點埋設深度（公尺）。
     """
     try:
         w, s, e, n = (float(v) for v in bbox.split(","))
@@ -110,6 +114,7 @@ def pipes_3d(
                    ST_Transform(ST_SetSRID(ST_MakePoint((%(w)s + %(e)s) / 2, (%(s)s + %(n)s) / 2), 4326), 3826) AS c
         ), r AS (
             SELECT p.gid, p.material AS mat, round(({_DIA_M})::numeric, 4)::float8 AS dia,
+                   round(({_HEIGHT_M})::numeric, 4)::float8 AS h, p.pipe_count AS n,
                    p.start_dep AS sd, p.end_dep AS ed, p.geom,
                    row_number() OVER (ORDER BY p.geom <-> q.c) AS rn
             FROM {{tbl}} p, q
@@ -120,7 +125,7 @@ def pipes_3d(
         SELECT json_build_object(
             'truncated', count(*) > %(limit)s,
             'pipes', coalesce(json_agg(json_build_object(
-                'gid', gid, 'mat', mat, 'dia', dia, 'sd', sd, 'ed', ed,
+                'gid', gid, 'mat', mat, 'dia', dia, 'h', h, 'n', n, 'sd', sd, 'ed', ed,
                 'coords', ST_AsGeoJSON(ST_Transform(geom, 4326), 8)::json -> 'coordinates'
             ) ORDER BY rn) FILTER (WHERE rn <= %(limit)s), '[]'::json)
         )::text
