@@ -5,6 +5,10 @@ import type { BasemapId } from '../basemaps';
 import type { OverlayId } from '../overlays';
 import type { Pipe3DOptions, Pipe3DStatus, Pipes3DResponse } from '../../types/pipe3d';
 import type { CesiumScene } from './CesiumScene';
+import { ScaleBar } from '../../components/ScaleBar';
+import { metersPerPixel } from '../cameraScale';
+import { setPointerLngLat } from '../pointerCoord';
+import type { ScaleBarSettings } from '../../types/scaleBar';
 
 declare global {
   interface Window {
@@ -21,6 +25,7 @@ interface Props {
   pipe3dOptions: Pipe3DOptions;
   /** 地面不透明度 0～1 */
   groundOpacity: number;
+  scaleBar: ScaleBarSettings;
   onStatus: (s: Pipe3DStatus) => void;
   /** 場景建立完成（或卸載時傳 null），供上層做視角同步 */
   onReady: (scene: CesiumScene | null) => void;
@@ -29,6 +34,7 @@ interface Props {
 export function CesiumView(p: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scene, setScene] = useState<CesiumScene | null>(null);
+  const [mpp, setMpp] = useState<number | null>(null);
 
   // 最新的 props（建立場景時套用初始狀態用，避免重建）
   const latest = useRef(p);
@@ -74,6 +80,20 @@ export function CesiumView(p: Props) {
   useEffect(() => scene?.setPipeOptions(p.pipe3dOptions), [scene, p.pipe3dOptions]);
   useEffect(() => scene?.setMaterials(p.enabledMaterials), [scene, p.enabledMaterials]);
 
+  // ---- 比例尺：畫面中心的地面解析度（鏡頭傾斜時只代表畫面中心附近）
+  useEffect(() => {
+    if (!scene) return;
+    const update = () => {
+      const v = scene.getView();
+      setMpp(v ? metersPerPixel(v.zoom, v.lat) : null);
+    };
+    update();
+    return scene.onViewChange((v) => setMpp(metersPerPixel(v.zoom, v.lat)));
+  }, [scene]);
+
+  // ---- 坐標顯示：滑鼠所指地面位置
+  useEffect(() => scene?.onPointerMove(setPointerLngLat), [scene]);
+
   // ---- 鏡頭停止時依畫面範圍載入管線
   useEffect(() => {
     if (!scene) return;
@@ -114,5 +134,10 @@ export function CesiumView(p: Props) {
     };
   }, [scene]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      <ScaleBar settings={p.scaleBar} metersPerPixel={mpp} />
+    </div>
+  );
 }

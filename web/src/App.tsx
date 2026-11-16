@@ -13,6 +13,22 @@ import type { OverlayId } from './map/overlays';
 import { DATA_BOUNDS, GROUND_OPACITY_DEFAULT, PIPES_CENTER } from './config';
 import type { HeightMode, Pipe3DStatus } from './types/pipe3d';
 import type { ViewMode } from './types/view';
+import { ScaleBarSettingsDrawer } from './components/ScaleBarSettingsDrawer';
+import { CoordinateDisplay } from './components/CoordinateDisplay';
+import { CoordSettingsDrawer } from './components/CoordSettingsDrawer';
+import {
+  DEFAULT_COORD_DISPLAY,
+  LNGLAT_DECIMALS_RANGE,
+  XY_DECIMALS_RANGE,
+  isCoordSystem,
+  type CoordDisplaySettings,
+} from './types/coordSystem';
+import {
+  DEFAULT_SCALE_BAR,
+  SCALE_BAR_MAX_WIDTH_RANGE,
+  SCALE_BAR_STYLES,
+  type ScaleBarSettings,
+} from './types/scaleBar';
 
 // 版面偏好（只存在這台瀏覽器；讀寫失敗時用預設值）
 const STORE_KEY = 'utl.layout';
@@ -25,6 +41,43 @@ function loadLayout(): { mode: ViewMode; ratio: number } {
     };
   } catch {
     return { mode: '2d', ratio: 0.5 };
+  }
+}
+
+// 比例尺設定（只存在這台瀏覽器；不合法的欄位用預設值）
+const SCALE_STORE_KEY = 'utl.scaleBar';
+function loadScaleBar(): ScaleBarSettings {
+  try {
+    const v = JSON.parse(localStorage.getItem(SCALE_STORE_KEY) ?? '{}') as Partial<ScaleBarSettings>;
+    const d = DEFAULT_SCALE_BAR;
+    const { min, max } = SCALE_BAR_MAX_WIDTH_RANGE;
+    return {
+      visible: typeof v.visible === 'boolean' ? v.visible : d.visible,
+      style: SCALE_BAR_STYLES.some((s) => s.id === v.style) ? v.style! : d.style,
+      unit: v.unit === 'metric' || v.unit === 'imperial' ? v.unit : d.unit,
+      maxWidth: typeof v.maxWidth === 'number' ? Math.min(Math.max(v.maxWidth, min), max) : d.maxWidth,
+    };
+  } catch {
+    return DEFAULT_SCALE_BAR;
+  }
+}
+
+// 坐標顯示設定（只存在這台瀏覽器；不合法的欄位用預設值）
+const COORD_STORE_KEY = 'utl.coordDisplay';
+function loadCoordDisplay(): CoordDisplaySettings {
+  const d = DEFAULT_COORD_DISPLAY;
+  const int = (v: unknown, r: { min: number; max: number }, def: number) =>
+    typeof v === 'number' && Number.isInteger(v) ? Math.min(Math.max(v, r.min), r.max) : def;
+  try {
+    const v = JSON.parse(localStorage.getItem(COORD_STORE_KEY) ?? '{}') as Partial<CoordDisplaySettings>;
+    return {
+      system: isCoordSystem(v.system) ? v.system : d.system,
+      lngLatDecimals: int(v.lngLatDecimals, LNGLAT_DECIMALS_RANGE, d.lngLatDecimals),
+      xDecimals: int(v.xDecimals, XY_DECIMALS_RANGE, d.xDecimals),
+      yDecimals: int(v.yDecimals, XY_DECIMALS_RANGE, d.yDecimals),
+    };
+  } catch {
+    return d;
   }
 }
 
@@ -45,6 +98,24 @@ export default function App() {
   const [exaggeration, setExaggeration] = useState(5);
   const [groundOpacity, setGroundOpacity] = useState(GROUND_OPACITY_DEFAULT);
   const [pipe3dStatus, setPipe3dStatus] = useState<Pipe3DStatus>({ kind: 'off' });
+  const [scaleBar, setScaleBar] = useState<ScaleBarSettings>(loadScaleBar);
+  const [scaleSettingsOpen, setScaleSettingsOpen] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCALE_STORE_KEY, JSON.stringify(scaleBar));
+    } catch {
+      // 無法儲存時忽略
+    }
+  }, [scaleBar]);
+  const [coordDisplay, setCoordDisplay] = useState<CoordDisplaySettings>(loadCoordDisplay);
+  const [coordSettingsOpen, setCoordSettingsOpen] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(COORD_STORE_KEY, JSON.stringify(coordDisplay));
+    } catch {
+      // 無法儲存時忽略
+    }
+  }, [coordDisplay]);
   const pipe3dOptions = useMemo(() => ({ heightMode, exaggeration }), [heightMode, exaggeration]);
 
   // ---- 3D：第一次切到含 3D 的模式才建立 Cesium，之後保留
@@ -96,6 +167,20 @@ export default function App() {
         onOverlaysChange={setOverlays}
         overlayOpacity={overlayOpacity}
         onOverlayOpacityChange={setOverlayOpacity}
+        onOpenScaleSettings={() => setScaleSettingsOpen(true)}
+        onOpenCoordSettings={() => setCoordSettingsOpen(true)}
+      />
+      <ScaleBarSettingsDrawer
+        open={scaleSettingsOpen}
+        onOpenChange={setScaleSettingsOpen}
+        settings={scaleBar}
+        onChange={setScaleBar}
+      />
+      <CoordSettingsDrawer
+        open={coordSettingsOpen}
+        onOpenChange={setCoordSettingsOpen}
+        settings={coordDisplay}
+        onChange={setCoordDisplay}
       />
       <div className="relative flex min-h-0 flex-1">
         <SplitView
@@ -109,6 +194,7 @@ export default function App() {
               overlays={overlays}
               overlayOpacity={overlayOpacity}
               enabledMaterials={enabledMaterials}
+              scaleBar={scaleBar}
               mapRef={mapRef}
               onZoomChange={setZoom}
               onTileError={setTileError}
@@ -124,12 +210,14 @@ export default function App() {
                 enabledMaterials={enabledMaterials}
                 pipe3dOptions={pipe3dOptions}
                 groundOpacity={groundOpacity}
+                scaleBar={scaleBar}
                 onStatus={setPipe3dStatus}
                 onReady={setScene}
               />
             )
           }
         />
+        <CoordinateDisplay settings={coordDisplay} />
         <ControlPanel
           show2d={show2d}
           show3d={show3d}

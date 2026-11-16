@@ -21,6 +21,10 @@ import {
   pipeLayers,
 } from './pipeStyle';
 import { PipeAttributeTable } from '../components/PipeAttributeTable';
+import { ScaleBar } from '../components/ScaleBar';
+import { metersPerPixel } from './cameraScale';
+import { setPointerLngLat } from './pointerCoord';
+import type { ScaleBarSettings } from '../types/scaleBar';
 import type { PipeProperties } from '../types/pipe';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
@@ -31,6 +35,7 @@ interface Props {
   /** 疊加圖層不透明度 0～1 */
   overlayOpacity: number;
   enabledMaterials: ReadonlySet<string>;
+  scaleBar: ScaleBarSettings;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
@@ -85,6 +90,7 @@ export function MapView({
   overlays,
   overlayOpacity,
   enabledMaterials,
+  scaleBar,
   mapRef,
   onZoomChange,
   onTileError,
@@ -92,6 +98,7 @@ export function MapView({
   const containerRef = useRef<HTMLDivElement>(null);
   const [popupNode] = useState(() => document.createElement('div'));
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [mpp, setMpp] = useState<number | null>(null);
 
   // 用 ref 保存最新的 callback，避免地圖重建
   const cb = useRef({ onZoomChange, onTileError });
@@ -107,20 +114,29 @@ export function MapView({
       maxZoom: 21,
       maxPitch: MAP_MAX_PITCH,
       hash: true,
+      // 出處改顯示在左下角比例尺旁（見下方 attribution）
+      attributionControl: false,
     });
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
     const reportZoom = () => cb.current.onZoomChange(map.getZoom());
     map.on('zoom', reportZoom);
     map.on('load', reportZoom);
+    // 比例尺：以畫面中心的地面解析度計算（取代 MapLibre 內建 ScaleControl）
+    const reportScale = () => setMpp(metersPerPixel(map.getZoom(), map.getCenter().lat));
+    map.on('move', reportScale);
+    map.on('load', reportScale);
     map.on('error', (e) => {
       const err = e as maplibregl.ErrorEvent & { sourceId?: string };
       if (err.sourceId === PIPE_SOURCE_ID || String(err.error?.message ?? '').includes(PIPE_TILEJSON)) {
         cb.current.onTileError(`無法連線圖磚服務 ${PIPE_TILEJSON}，請先執行 tiles\\start-martin.ps1。`);
       }
     });
+
+    // ---- 坐標顯示：滑鼠所在位置
+    map.on('mousemove', (e) => setPointerLngLat({ lng: e.lngLat.lng, lat: e.lngLat.lat }));
+    map.getCanvasContainer().addEventListener('mouseleave', () => setPointerLngLat(null));
 
     // ---- 滑過
     let hoverId: string | number | null = null;
@@ -205,13 +221,21 @@ export function MapView({
     else map.once('load', apply);
   }, [enabledMaterials, mapRef]);
 
+  // ---- 出處：目前底圖＋開啟的疊加圖層（政府資料開放授權須顯名）
+  const bm = BASEMAPS[basemap].source?.attribution;
+  const attribution = [
+    ...new Set([bm, ...[...overlays].map((id) => OVERLAYS[id].source.attribution)].filter(Boolean)),
+    'MapLibre',
+  ].join(' | ');
+
   return (
-    <>
+    <div className="relative h-full w-full">
       {/* 不能用 absolute inset-0：maplibre-gl.css 的 .maplibregl-map{position:relative} 未分層，
           會蓋過 Tailwind 4（在 @layer 內）的 absolute，容器高度變 0 */}
       <div ref={containerRef} className="h-full w-full" />
       {selection &&
         createPortal(<PipeAttributeTable id={selection.id} props={selection.props} />, popupNode)}
-    </>
+      <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
+    </div>
   );
 }

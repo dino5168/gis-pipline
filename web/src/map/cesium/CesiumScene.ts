@@ -21,6 +21,8 @@ import {
   Primitive,
   Quaternion,
   Ray,
+  ScreenSpaceEventHandler,
+  ScreenSpaceEventType,
   Transforms,
   UrlTemplateImageryProvider,
   Viewer,
@@ -208,6 +210,25 @@ export class CesiumScene {
       const v = this.getView();
       if (v) cb(v);
     });
+  }
+
+  /** 滑鼠移動時回報所指地面的經緯度（指到天空時為 null）；回傳取消函式 */
+  onPointerMove(cb: (p: { lng: number; lat: number } | null) => void): () => void {
+    const { scene, camera } = this.viewer;
+    const handler = new ScreenSpaceEventHandler(scene.canvas);
+    handler.setInputAction((e: ScreenSpaceEventHandler.MotionEvent) => {
+      const ray = camera.getPickRay(e.endPosition);
+      const pos = (ray && scene.globe.pick(ray, scene)) ?? camera.pickEllipsoid(e.endPosition);
+      if (!pos) return cb(null);
+      const c = Cartographic.fromCartesian(pos);
+      cb({ lng: CesiumMath.toDegrees(c.longitude), lat: CesiumMath.toDegrees(c.latitude) });
+    }, ScreenSpaceEventType.MOUSE_MOVE);
+    const leave = () => cb(null);
+    scene.canvas.addEventListener('mouseleave', leave);
+    return () => {
+      scene.canvas.removeEventListener('mouseleave', leave);
+      if (!handler.isDestroyed()) handler.destroy();
+    };
   }
 
   /** 鏡頭停止移動時通知；回傳取消函式 */

@@ -1,4 +1,4 @@
-import { Box, Columns2, Map as MapIcon } from 'lucide-react';
+import { Box, Columns2, Crosshair, Map as MapIcon, Ruler } from 'lucide-react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { VIEW_MODE_LABELS, type ViewMode } from '../types/view';
@@ -6,7 +6,7 @@ import type { BasemapId } from '../map/basemaps';
 import type { OverlayId } from '../map/overlays';
 import { LayersMegaMenu } from './LayersMegaMenu';
 import { MEGA_TILE_CLASS, MegaSection, MegaTileBody, TileIcon } from './MegaTile';
-import { Menubar, MenubarContent, MenubarMenu, MenubarTrigger } from '@/components/ui/menubar';
+import { Menubar, MenubarContent, MenubarItem, MenubarMenu, MenubarTrigger } from '@/components/ui/menubar';
 
 const MODE_ICONS: Record<ViewMode, ReactNode> = {
   '2d': <MapIcon />,
@@ -23,10 +23,18 @@ interface Props {
   onOverlaysChange: (next: Set<OverlayId>) => void;
   overlayOpacity: number;
   onOverlayOpacityChange: (v: number) => void;
+  onOpenScaleSettings: () => void;
+  onOpenCoordSettings: () => void;
 }
 
 /** 頂端選單列（Mega Menu：縮圖方格） */
-export function AppMenu({ mode, onModeChange, ...layers }: Props) {
+export function AppMenu({
+  mode,
+  onModeChange,
+  onOpenScaleSettings,
+  onOpenCoordSettings,
+  ...layers
+}: Props) {
   return (
     <header className="bg-background flex h-11 shrink-0 items-center gap-3 border-b px-3">
       <h1 className="text-sm font-semibold whitespace-nowrap">台北市公共管線</h1>
@@ -50,6 +58,19 @@ export function AppMenu({ mode, onModeChange, ...layers }: Props) {
           </MenubarContent>
         </MenubarMenu>
         <LayersMegaMenu {...layers} />
+        <MenubarMenu>
+          <MenubarTrigger>設定</MenubarTrigger>
+          <MenubarContent>
+            <MenubarItem onSelect={onOpenScaleSettings}>
+              <Ruler />
+              比例尺
+            </MenubarItem>
+            <MenubarItem onSelect={onOpenCoordSettings}>
+              <Crosshair />
+              坐標系
+            </MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
       </Menubar>
       <span className="text-muted-foreground ml-auto hidden text-xs sm:inline">{VIEW_MODE_LABELS[mode]}</span>
     </header>
