@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from psycopg import sql
 
 from .db import pool
 
@@ -40,18 +41,38 @@ def health() -> dict:
     return {"status": "ok", **row}
 
 
+# 可查詢的管線資料表（一種管線一張表，名稱與 Martin 圖磚 source 相同）。只接受這裡列出的名稱。
+PIPE_LAYERS = {
+    "utl_pipe": "管線（類別碼 8040101）",
+    "utl_tel_pipe": "一般電信系統管線（類別碼 8010101）",
+}
+LayerParam = Query("utl_pipe", description="管線資料表：" + "、".join(PIPE_LAYERS))
+
+
+def _layer_table(layer: str) -> sql.Identifier:
+    if layer not in PIPE_LAYERS:
+        raise HTTPException(422, f"layer 只能是 {', '.join(PIPE_LAYERS)}")
+    return sql.Identifier(layer)
+
+
+@app.get("/api/layers")
+def layers() -> list[dict]:
+    """可用的管線資料表。"""
+    return [{"layer": k, "name": v} for k, v in PIPE_LAYERS.items()]
+
+
 @app.get("/api/pipes/{gid}")
-def pipe_detail(gid: int) -> dict:
+def pipe_detail(gid: int, layer: str = LayerParam) -> dict:
     """單一管線：全部屬性＋保留 Z 值的 GeoJSON 幾何（EPSG:4326）。"""
-    sql = """
+    query = sql.SQL("""
         SELECT to_jsonb(p) - 'geom' - 'gid' AS props,
                ST_AsGeoJSON(ST_Transform(p.geom, 4326), 8) AS geometry
-        FROM utl_pipe p WHERE gid = %s
-    """
+        FROM {tbl} p WHERE gid = %s
+    """).format(tbl=_layer_table(layer))
     with pool.connection() as conn:
-        row = conn.execute(sql, [gid]).fetchone()
+        row = conn.execute(query, [gid]).fetchone()
     if not row:
-        raise HTTPException(404, f"找不到管線 gid={gid}")
+        raise HTTPException(404, f"找不到管線 {layer} gid={gid}")
     return {"type": "Feature", "id": gid, "properties": row["props"], "geometry": json.loads(row["geometry"])}
 
 
@@ -65,6 +86,7 @@ PIPES3D_MAX_LIMIT = 10000
 def pipes_3d(
     bbox: str = Query(..., description="west,south,east,north（EPSG:4326）"),
     limit: int = Query(5000, ge=1, le=PIPES3D_MAX_LIMIT),
+    layer: str = LayerParam,
 ) -> dict:
     """3D 用的精簡管線資料：範圍內的管線，離 bbox 中心近的優先，最多 limit 筆。
 
@@ -74,6 +96,7 @@ def pipes_3d(
         w, s, e, n = (float(v) for v in bbox.split(","))
     except ValueError:
         raise HTTPException(422, "bbox 格式應為 west,south,east,north")
+    tbl = _layer_table(layer)
     if not (w < e and s < n):
         raise HTTPException(422, "bbox 範圍不正確")
     if e - w > PIPES3D_MAX_SPAN or n - s > PIPES3D_MAX_SPAN:
@@ -81,7 +104,7 @@ def pipes_3d(
 
     # 整包 JSON 由 PostgreSQL 組好、原樣回傳，省掉 Python 解析再序列化（5000 筆約省一半時間，見 2-Tasks/1-效能評估.md）。
     # 多取 1 筆（limit + 1）只用來判斷 truncated。
-    sql = f"""
+    query = sql.SQL(f"""
         WITH q AS (
             SELECT ST_Transform(ST_MakeEnvelope(%(w)s, %(s)s, %(e)s, %(n)s, 4326), 3826) AS box,
                    ST_Transform(ST_SetSRID(ST_MakePoint((%(w)s + %(e)s) / 2, (%(s)s + %(n)s) / 2), 4326), 3826) AS c
@@ -89,7 +112,7 @@ def pipes_3d(
             SELECT p.gid, p.material AS mat, round(({_DIA_M})::numeric, 4)::float8 AS dia,
                    p.start_dep AS sd, p.end_dep AS ed, p.geom,
                    row_number() OVER (ORDER BY p.geom <-> q.c) AS rn
-            FROM utl_pipe p, q
+            FROM {{tbl}} p, q
             WHERE p.geom && q.box
             ORDER BY p.geom <-> q.c
             LIMIT %(limit)s + 1
@@ -102,7 +125,7 @@ def pipes_3d(
             ) ORDER BY rn) FILTER (WHERE rn <= %(limit)s), '[]'::json)
         )::text
         FROM r
-    """
+    """).format(tbl=tbl)
     with pool.connection() as conn:
-        body = conn.execute(sql, {"w": w, "s": s, "e": e, "n": n, "limit": limit}).fetchone()
+        body = conn.execute(query, {"w": w, "s": s, "e": e, "n": n, "limit": limit}).fetchone()
     return Response(next(iter(body.values())), media_type="application/json")
