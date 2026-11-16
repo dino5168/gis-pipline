@@ -10,7 +10,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 // MapLibre 6 預設從主程式旁邊載入 worker，但 Vite 會把主程式預先打包到 .vite/deps，
 // 那裡沒有 worker 檔 → 地圖整張不畫。改成明確指定 worker 位址。
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-import { MAP_MAX_PITCH, TAIPEI_CENTER, TILES_BASE } from '../config';
+// 2D 傾斜停用中，恢復時一併匯入 MAP_MAX_PITCH
+import { TAIPEI_CENTER, TILES_BASE } from '../config';
 import { BASEMAPS, BASEMAP_IDS, basemapLayerId, type BasemapId } from './basemaps';
 import { OVERLAYS, OVERLAY_IDS, overlayLayerId, type OverlayId } from './overlays';
 import {
@@ -130,13 +131,19 @@ export function MapView({
       center: TAIPEI_CENTER,
       zoom: 15,
       maxZoom: 21,
-      maxPitch: MAP_MAX_PITCH,
+      // 2D 圖台只做 2D：傾斜功能先停用（保留旋轉）。要恢復傾斜：改回 maxPitch: MAP_MAX_PITCH，
+      // 並拿掉 pitchWithRotate / touchPitch 兩行、NavigationControl 的 visualizePitch: false。
+      // maxPitch: MAP_MAX_PITCH,
+      maxPitch: 0,
+      pitchWithRotate: false, // 右鍵／Ctrl 拖曳只旋轉，不傾斜
+      touchPitch: false, // 雙指上下拖曳不傾斜
       hash: true,
       // 出處改顯示在左下角比例尺旁（見下方 attribution）
       attributionControl: false,
     });
     mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    // 傾斜停用：指北針只表示旋轉（拖曳指北針也不會傾斜）
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
 
     const reportZoom = () => cb.current.onZoomChange(map.getZoom());
     map.on('zoom', reportZoom);
