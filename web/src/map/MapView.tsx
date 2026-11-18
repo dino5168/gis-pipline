@@ -28,6 +28,9 @@ import { ScaleBar } from '../components/ScaleBar';
 import { MapZoomControls } from '../components/MapZoomControls';
 import { MeasureControl } from '../components/MeasureControl';
 import { MeasureTool } from './measureTool';
+import { DrawControl } from '../components/DrawControl';
+import { DrawTool } from './drawTool';
+import type { DrawMode, DrawStatus } from '../types/draw';
 import type { MeasureResult } from './measure';
 import type { MeasureMode, MeasureStyle } from '../types/measure';
 import { metersPerPixel } from './cameraScale';
@@ -148,6 +151,22 @@ export function MapView({
   const [measureOpen, setMeasureOpen] = useState(false);
   const [measureMode, setMeasureMode] = useState<MeasureMode | null>(null);
   const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
+  // ---- 繪圖（與量測互斥）
+  const drawRef = useRef<DrawTool | null>(null);
+  const [drawOpen, setDrawOpen] = useState(false);
+  const [drawMode, setDrawMode] = useState<DrawMode | null>(null);
+  const [drawStatus, setDrawStatus] = useState<DrawStatus | null>(null);
+  const changeDrawMode = (mode: DrawMode | null) => {
+    setDrawMode(mode);
+    drawRef.current?.setMode(mode);
+  };
+  const closeDraw = () => {
+    setDrawOpen(false);
+    setDrawMode(null);
+    drawRef.current?.setOpen(false);
+  };
+  const closeDrawRef = useRef(closeDraw);
+  closeDrawRef.current = closeDraw;
   const changeMeasureMode = (mode: MeasureMode | null) => {
     setMeasureMode(mode);
     measureRef.current?.setMode(mode);
@@ -208,12 +227,19 @@ export function MapView({
       onExit: () => closeMeasureRef.current(),
     });
     measureRef.current = measure;
+    const draw = new DrawTool(map, {
+      onChange: setDrawStatus,
+      onExit: () => closeDrawRef.current(),
+    });
+    drawRef.current = draw;
+    /** 量測或繪圖中：暫停管線滑過／點選 */
+    const busy = () => measure.active || draw.active;
 
     // ---- 滑過
     let hover: FeatureIdentifier | null = null;
     const sameFeature = (a: FeatureIdentifier, b: FeatureIdentifier) => a.source === b.source && a.id === b.id;
     map.on('mousemove', PIPE_LAYER_IDS, (e) => {
-      if (measure.active) return;
+      if (busy()) return;
       const f = e.features?.[0];
       if (!f || f.id === undefined) return;
       const fid = featureId({ source: f.source, sourceLayer: f.sourceLayer, id: f.id });
@@ -223,7 +249,7 @@ export function MapView({
       map.setFeatureState(fid, { hover: true });
     });
     map.on('mouseleave', PIPE_LAYER_IDS, () => {
-      if (!measure.active) map.getCanvas().style.cursor = '';
+      if (!busy()) map.getCanvas().style.cursor = '';
       if (hover) map.setFeatureState(hover, { hover: false });
       hover = null;
     });
@@ -237,7 +263,7 @@ export function MapView({
       setSelection(null);
     });
     map.on('click', PIPE_LAYER_IDS, (e) => {
-      if (measure.active) return;
+      if (busy()) return;
       // 多種管線重疊時取最上層的那條
       const f = e.features?.[0];
       if (!f || f.id === undefined || !isPipeKindId(f.sourceLayer)) return;
@@ -251,6 +277,8 @@ export function MapView({
     return () => {
       measure.destroy();
       measureRef.current = null;
+      draw.destroy();
+      drawRef.current = null;
       popup.remove();
       map.remove();
       mapRef.current = null;
@@ -370,20 +398,38 @@ export function MapView({
         onReset={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0 })}
         onZoomOut={() => mapRef.current?.zoomOut()}
       />
-      <MeasureControl
-        open={measureOpen}
-        mode={measureMode}
-        result={measureResult}
-        onToggleOpen={() => {
-          if (measureOpen) closeMeasure();
-          else {
-            // 展開時預設距離量測
-            setMeasureOpen(true);
-            changeMeasureMode('distance');
-          }
-        }}
-        onModeChange={changeMeasureMode}
-      />
+      {/* 左側中間：量測、繪圖（兩者互斥，開一個就關另一個） */}
+      <div className="absolute top-1/2 left-3 z-40 flex -translate-y-1/2 flex-col items-start gap-2">
+        <MeasureControl
+          open={measureOpen}
+          mode={measureMode}
+          result={measureResult}
+          onToggleOpen={() => {
+            if (measureOpen) closeMeasure();
+            else {
+              closeDraw();
+              // 展開時預設距離量測
+              setMeasureOpen(true);
+              changeMeasureMode('distance');
+            }
+          }}
+          onModeChange={changeMeasureMode}
+        />
+        <DrawControl
+          open={drawOpen}
+          mode={drawMode}
+          status={drawStatus}
+          onToggleOpen={() => {
+            if (drawOpen) closeDraw();
+            else {
+              closeMeasure();
+              setDrawOpen(true);
+              drawRef.current?.setOpen(true);
+            }
+          }}
+          onModeChange={changeDrawMode}
+        />
+      </div>
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
     </div>
   );

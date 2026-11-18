@@ -1,4 +1,4 @@
-// 2D 圖台左側中間的量測按鈕：按下「量測」展開「距離｜面積｜正方形｜圓形」，下方顯示結果與操作提示。
+// 2D 圖台左側中間的量測按鈕（外層定位由 MapView 負責）：按下「量測」展開「距離｜面積｜正方形｜圓形」，下方顯示結果與操作提示。
 import { Circle, Pentagon, Ruler, Spline, Square } from 'lucide-react';
 import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
@@ -35,8 +35,7 @@ function hint(mode: MeasureMode, r: MeasureResult | null): string {
 export function MeasureControl({ open, mode, result, onToggleOpen, onModeChange }: Props) {
   const hasValue = result && result.lengthM > 0;
   return (
-    <div className="absolute top-1/2 left-3 z-40 flex -translate-y-1/2 flex-col items-start gap-2">
-      <div className="flex items-stretch gap-1">
+    <div className="relative flex items-stretch gap-1">
         <div className="bg-card/75 overflow-hidden rounded-md shadow-sm backdrop-blur-sm">
           <Button
             variant="ghost"
@@ -72,9 +71,9 @@ export function MeasureControl({ open, mode, result, onToggleOpen, onModeChange 
             })}
           </div>
         )}
-      </div>
+      {/* 結果面板放在圖示列下方（absolute），不推動下方繪圖按鈕的位置 */}
       {open && mode && (
-        <div className="bg-card/90 text-foreground w-60 rounded-md px-3 py-2 text-xs shadow-sm backdrop-blur-sm">
+        <div className="bg-card/90 text-foreground absolute top-full left-10 z-10 mt-2 w-60 rounded-md px-3 py-2 text-xs shadow-sm backdrop-blur-sm">
           {hasValue && (
             <dl className="mb-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 font-mono tabular-nums">
               {isTwoPointMode(mode) && (
