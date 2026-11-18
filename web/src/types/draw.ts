@@ -34,6 +34,7 @@ export const DRAW_IMPLEMENTED_MODES: ReadonlySet<DrawMode> = new Set<DrawMode>([
   'select',
   'drag',
   'rotate',
+  'cut',
   'delete',
 ]);
 
@@ -55,6 +56,8 @@ export interface DrawMeasure {
   heightM?: number;
   /** 圓：半徑（公尺） */
   radiusM?: number;
+  /** 挖過洞的多邊形：洞的數目（面積已扣掉洞、周長含洞的邊） */
+  holes?: number;
   /** 點：經緯度 */
   lngLat?: [number, number];
 }

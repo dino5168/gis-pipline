@@ -71,6 +71,7 @@ const START_HINT: Partial<Record<DrawMode, string>> = {
     '單擊圖形選取；拖頂點移動（可吸附），點邊中點加頂點，右鍵刪頂點；矩形拖角、圓拖邊調整大小；Delete 刪除；雙擊文字可修改',
   drag: '單擊圖形選取，再拖曳移動整個圖形',
   rotate: '按住圖形拖曳，繞中心旋轉',
+  cut: '畫一個多邊形，減去它蓋到的面（多邊形／矩形／圓）：在內部挖洞、跨邊界切掉一塊；有洞的圖形不能編輯頂點',
   delete: '單擊圖形刪除（Ctrl+Z 復原）',
 };
 
@@ -78,6 +79,7 @@ const START_HINT: Partial<Record<DrawMode, string>> = {
 const DRAWING_HINT: Partial<Record<DrawMode, string>> = {
   linestring: '單擊加點；在最後一點再單擊（或雙擊、Enter）結束',
   polygon: '單擊加點；單擊起點或最後一點（或雙擊、Enter）結束',
+  cut: '單擊加點；單擊起點或最後一點（或雙擊、Enter）結束並挖洞',
   rectangle: '單擊決定對角',
   circle: '單擊決定半徑',
 };
@@ -98,6 +100,7 @@ function measureRows(m: DrawMeasure): [string, string][] {
   if (m.widthM !== undefined && m.heightM !== undefined)
     rows.push(['寬 × 高', `${formatDistance(m.widthM)} × ${formatDistance(m.heightM)}`]);
   if (m.radiusM !== undefined) rows.push(['半徑', formatDistance(m.radiusM)]);
+  if (m.holes) rows.push(['洞', `${m.holes} 個`]);
   rows.push(['面積', formatArea(m.areaM2)], ['周長', formatDistance(m.lengthM)]);
   return rows;
 }

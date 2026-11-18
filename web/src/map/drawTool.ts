@@ -5,6 +5,8 @@
 // 吸附：用 Terra Draw 的 snapping.toFeature，只吸附自己畫的圖形（頂點優先、其次是邊），不吸附管線。
 // 文字標註：Terra Draw 點模式另開一個實例（modeName 'text'），文字存在 properties.text，
 // 用 MapLibre Marker 顯示（地圖樣式沒有 glyphs，不能用 symbol 文字）；選取／拖曳／刪除／復原沿用點的做法。
+// 挖洞：Terra Draw 多邊形模式另開一個實例（modeName 'cut'）畫刀，畫完由 drawCut.ts 做差集；
+// 有洞的結果是自訂模式 'holed'（不能編輯頂點，拖曳由這裡自己處理）。
 import type { Feature } from 'geojson';
 import * as maplibregl from 'maplibre-gl';
 import {
@@ -20,6 +22,7 @@ import {
 } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import { lngLatToTwd97, twd97ToLngLat } from './coordTransform';
+import { CUT_MODE, CUTTABLE_MODES, HOLED_MODE, TerraDrawHoledPolygonMode, cutFeatures } from './drawCut';
 import { polygonArea, segmentLengths, type LngLat } from './measure';
 import {
   DRAW_COLOR,
@@ -93,6 +96,10 @@ const KEY_EVENTS = { cancel: null, finish: 'Enter' } as const;
 const SELECT_KEY_EVENTS = { deselect: null, delete: 'Delete', rotate: null, scale: null } as const;
 
 const SHAPE_MODES = Object.keys(DRAW_SHAPE_MODE_NAMES) as DrawShapeMode[];
+/** Terra Draw 裡使用者圖形的所有模式（圖形模式＋有洞的多邊形） */
+const FEATURE_MODES: readonly string[] = [...SHAPE_MODES, HOLED_MODE];
+/** 可被吸附的圖形（文字不算） */
+const SNAP_MODES: ReadonlySet<string> = new Set(FEATURE_MODES.filter((m) => m !== 'text'));
 
 /**
  * 選取類模式的游標：空白處維持 MapLibre 的手形（平移地圖）、圖形上 pointer（可點選）、
@@ -120,7 +127,7 @@ const SNAP_POINT = {
 /** 可吸附的對象：使用者畫好的圖形（排除輔助點、繪製中的圖形；正在畫／編輯的圖形本身由 Terra Draw 排除） */
 function snapTarget(f: Feature): boolean {
   const p = f.properties;
-  if (!p || !SHAPE_MODES.includes(p.mode) || p.mode === TEXT_MODE) return false;
+  if (!p || !SNAP_MODES.has(p.mode)) return false;
   return !(p.currentlyDrawing || p.coordinatePoint || p.closingPoint || p.snappingPoint || p.selectionPoint || p.midPoint);
 }
 
@@ -145,7 +152,7 @@ interface TextEdit {
 
 /** 每種圖形套用同一組 select flags */
 function flagsForAll(feature: object) {
-  return Object.fromEntries(SHAPE_MODES.map((m) => [m, { feature }]));
+  return Object.fromEntries(FEATURE_MODES.map((m) => [m, { feature }]));
 }
 
 /** 選取／編輯頂點：線、多邊形拖頂點、點邊中點加頂點、右鍵刪頂點；矩形拖角縮放；圓拖邊改半徑；點直接拖 */
@@ -157,7 +164,15 @@ const EDIT_FLAGS = {
   polygon: { feature: { coordinates: { draggable: true, midpoints: true, deletable: true, snappable: SNAP_TO_FEATURE } } },
   rectangle: { feature: { coordinates: { resizable: 'opposite' } } },
   circle: { feature: { coordinates: { resizable: 'center' } } },
+  // 有洞的多邊形：只能選取（Terra Draw 編輯頂點會丟掉洞）
+  [HOLED_MODE]: { feature: {} },
 };
+
+/** 拖曳：有洞的多邊形由 DrawTool 自己拖（Terra Draw 拖曳只移動外環） */
+const DRAG_FLAGS = { ...flagsForAll({ draggable: true }), [HOLED_MODE]: { feature: {} } };
+
+/** 挖洞的刀：橘色（與繪圖色區分） */
+const CUT_COLOR = '#f97316';
 
 function createModes() {
   const select = (modeName: string, flags: Record<string, object>) =>
@@ -197,13 +212,33 @@ function createModes() {
       snapping: SNAP_TO_FEATURE,
       styles: { ...POLYGON, ...SNAP_POINT },
     }),
+    // 挖洞：畫多邊形當刀，畫完即做差集並刪除刀
+    new TerraDrawPolygonMode({
+      modeName: CUT_MODE,
+      keyEvents: KEY_EVENTS,
+      pointerDistance: SNAP_PX,
+      snapping: SNAP_TO_FEATURE,
+      styles: {
+        fillColor: CUT_COLOR,
+        fillOpacity: 0.1,
+        outlineColor: CUT_COLOR,
+        outlineWidth: 2,
+        ...CLOSING_POINT,
+        closingPointOutlineColor: CUT_COLOR,
+        ...VERTEX,
+        coordinatePointColor: CUT_COLOR,
+        ...SNAP_POINT,
+      },
+    }),
+    // 有洞的多邊形（挖洞的結果）：不會成為目前模式，只負責驗證與樣式
+    new TerraDrawHoledPolygonMode({ precision: COORD_PRECISION, styles: POLYGON }),
     // 文字標註：單擊放置位置（小點），再輸入文字；不吸附
     new TerraDrawPointMode({
       modeName: TEXT_MODE,
       styles: { pointColor: DRAW_COLOR, pointWidth: 3, pointOutlineColor: '#ffffff', pointOutlineWidth: 1 },
     }),
     select('select', EDIT_FLAGS),
-    select('drag', flagsForAll({ draggable: true })),
+    select('drag', DRAG_FLAGS),
     // 旋轉：只負責選取與醒目顯示，拖曳旋轉由 DrawTool 處理
     select('rotate', flagsForAll({})),
   ];
@@ -222,8 +257,9 @@ function isGuidance(f: GeoJSONStoreFeatures): boolean {
   );
 }
 
-/** 使用者畫好的圖形（不含輔助點、繪製中的圖形） */
-const isUserFeature = (f: GeoJSONStoreFeatures) => !isGuidance(f) && !f.properties.currentlyDrawing;
+/** 使用者畫好的圖形（不含輔助點、繪製中的圖形、挖洞的刀） */
+const isUserFeature = (f: GeoJSONStoreFeatures) =>
+  !isGuidance(f) && !f.properties.currentlyDrawing && f.properties.mode !== CUT_MODE;
 
 /** 復原快照不保存的屬性（選取狀態、輔助點 id 等，還原時由 Terra Draw 重建） */
 const TRANSIENT_PROPS = [
@@ -255,7 +291,9 @@ const sum = (v: number[]) => v.reduce((s, x) => s + x, 0);
 
 /** 計算一個圖形的量測值；不支援的圖形回傳 null */
 function measureFeature(f: GeoJSONStoreFeatures): DrawMeasure | null {
-  const mode = f.properties.mode;
+  const holed = f.properties.mode === HOLED_MODE;
+  // 有洞的多邊形當作多邊形顯示（另列洞數）
+  const mode = holed ? 'polygon' : f.properties.mode;
   if (!isShapeMode(mode)) return null;
   const drawing = Boolean(f.properties.currentlyDrawing);
   const g = f.geometry;
@@ -267,6 +305,13 @@ function measureFeature(f: GeoJSONStoreFeatures): DrawMeasure | null {
   const ring = openRing(g.coordinates[0] as LngLat[]);
   const sides = segmentLengths(ring, true);
   const out: DrawMeasure = { ...base, lengthM: sum(sides), areaM2: polygonArea(ring) };
+  if (holed) {
+    // 面積扣掉洞，周長含洞的邊
+    const holes = g.coordinates.slice(1).map((r) => openRing(r as LngLat[]));
+    out.areaM2 -= sum(holes.map((h) => polygonArea(h)));
+    out.lengthM += sum(holes.map((h) => sum(segmentLengths(h, true))));
+    out.holes = holes.length;
+  }
   if (mode === 'rectangle' && sides.length >= 2) {
     out.widthM = sides[0];
     out.heightM = sides[1];
@@ -282,14 +327,19 @@ function measureFeature(f: GeoJSONStoreFeatures): DrawMeasure | null {
 
 const round = (v: number) => Number(v.toFixed(COORD_PRECISION));
 
-/** 旋轉中的圖形：原始坐標（TWD97）、旋轉中心、起始角度 */
-interface RotateState {
+/** 自己處理的拖曳：旋轉（繞中心）或平移（有洞的多邊形）；坐標都用 TWD97 */
+interface TransformState {
+  kind: 'rotate' | 'move';
   id: FeatureId;
   type: 'LineString' | 'Polygon';
-  /** LineString 為一條、Polygon 為各環 */
+  /** 原始坐標：LineString 為一條、Polygon 為各環 */
   rings: [number, number][][];
+  /** 旋轉中心 */
   center: [number, number];
+  /** 旋轉：起始螢幕角度 */
   startAngle: number;
+  /** 平移：按下滑鼠的位置 */
+  startXY: [number, number];
 }
 
 interface Options {
@@ -316,7 +366,7 @@ export class DrawTool {
   private restoring = false;
   /** 滑鼠按住中（拖曳頂點／圖形時不記錄中間狀態） */
   private pointerDown = false;
-  private rotating: RotateState | null = null;
+  private transforming: TransformState | null = null;
   /** 文字標註的 Marker（feature id → Marker） */
   private textLabels = new Map<FeatureId, maplibregl.Marker>();
   private textEdit: TextEdit | null = null;
@@ -402,7 +452,10 @@ export class DrawTool {
       this.countFeatures();
       // 新的文字標註：先輸入文字，確定後才記入復原
       if (ctx.mode === TEXT_MODE && ctx.action === 'draw') this.startTextEdit(id, true);
-      else this.checkpoint();
+      else {
+        if (ctx.mode === CUT_MODE && ctx.action === 'draw') this.applyCut(id);
+        this.checkpoint();
+      }
       this.emit();
     });
     this.draw.on('select', (id) => {
@@ -475,7 +528,7 @@ export class DrawTool {
       }
     }
     // 編輯（右鍵刪頂點、Delete 刪圖形等）不一定有 finish 事件，改在狀態穩定時比對快照
-    if (!this.restoring && !this.pointerDown && !this.rotating && !this.isDrawing()) {
+    if (!this.restoring && !this.pointerDown && !this.transforming && !this.isDrawing()) {
       queueMicrotask(() => this.checkpoint());
     }
     this.syncTextLabels();
@@ -651,6 +704,35 @@ export class DrawTool {
     this.emit();
   }
 
+  // ---- 挖洞
+  /** 用剛畫完的刀切所有重疊的面，再刪掉刀；結果成為目前圖形（面板顯示量測值） */
+  private applyCut(cutterId: FeatureId) {
+    const d = this.draw;
+    if (!d?.enabled) return;
+    const cutter = d.getSnapshotFeature(cutterId);
+    this.restoring = true;
+    try {
+      if (d.hasFeature(cutterId)) d.removeFeatures([cutterId]);
+      if (cutter?.geometry.type !== 'Polygon') return;
+      const targets = d
+        .getSnapshot()
+        .filter((f) => isUserFeature(f) && f.geometry.type === 'Polygon' && CUTTABLE_MODES.has(String(f.properties.mode)));
+      const { removeIds, add } = cutFeatures(targets, cutter.geometry, COORD_PRECISION);
+      if (removeIds.length) d.removeFeatures(removeIds);
+      if (add.length) {
+        const bad = d.addFeatures(add).filter((v) => !v.valid);
+        if (bad.length) console.warn('[draw] 挖洞結果有圖形無效', bad);
+      }
+      this.currentId = (add.find((f) => d.hasFeature(f.id as FeatureId))?.id as FeatureId | undefined) ?? null;
+    } catch (err) {
+      console.warn('[draw] 挖洞失敗', err);
+    } finally {
+      this.restoring = false;
+    }
+    this.countFeatures();
+    this.syncTextLabels();
+  }
+
   private emit() {
     const d = this.draw;
     let f = d && this.currentId !== null ? d.getSnapshotFeature(this.currentId) : undefined;
@@ -667,7 +749,7 @@ export class DrawTool {
     });
   }
 
-  // ---- 刪除、旋轉（自己處理滑鼠）
+  // ---- 刪除、旋轉、有洞多邊形的拖曳（自己處理滑鼠）
   /** 滑鼠位置上最上層的使用者圖形 */
   private featureAt(e: maplibregl.MapMouseEvent): GeoJSONStoreFeatures | undefined {
     const d = this.draw;
@@ -694,13 +776,16 @@ export class DrawTool {
   };
 
   private handleMouseDown = (e: maplibregl.MapMouseEvent) => {
-    if (this.mode !== 'rotate' || e.originalEvent.button !== 0 || !this.draw?.enabled) return;
+    const kind = this.mode === 'rotate' ? 'rotate' : this.mode === 'drag' ? 'move' : null;
+    if (!kind || !this.mode || e.originalEvent.button !== 0 || !this.draw?.enabled) return;
     const f = this.featureAt(e);
     if (!f || f.geometry.type === 'Point') return;
+    // 拖曳模式只自己處理有洞的多邊形，其他交給 Terra Draw
+    if (kind === 'move' && f.properties.mode !== HOLED_MODE) return;
     // 不讓地圖跟著拖
     e.preventDefault();
     const id = f.id as FeatureId;
-    if (this.selectedId !== id) this.draw.selectFeature(id, 'rotate');
+    if (this.selectedId !== id) this.draw.selectFeature(id, this.mode);
     const rings = (f.geometry.type === 'LineString' ? [f.geometry.coordinates] : f.geometry.coordinates).map((r) =>
       r.map((p) => lngLatToTwd97(p[0], p[1])),
     );
@@ -710,9 +795,17 @@ export class DrawTool {
       sum(outer.map((p) => p[0])) / outer.length,
       sum(outer.map((p) => p[1])) / outer.length,
     ];
-    this.rotating = { id, type: f.geometry.type, rings, center, startAngle: this.screenAngle(center, e.point) };
+    this.transforming = {
+      kind,
+      id,
+      type: f.geometry.type,
+      rings,
+      center,
+      startAngle: this.screenAngle(center, e.point),
+      startXY: lngLatToTwd97(e.lngLat.lng, e.lngLat.lat),
+    };
     this.map.getCanvas().style.cursor = 'grabbing';
-    window.addEventListener('mouseup', this.handleRotateEnd);
+    window.addEventListener('mouseup', this.handleTransformEnd);
   };
 
   /** 滑鼠相對旋轉中心的螢幕角度（弧度，y 向下＝順時針為正） */
@@ -722,17 +815,26 @@ export class DrawTool {
   }
 
   private handleMouseMove = (e: maplibregl.MapMouseEvent) => {
-    const r = this.rotating;
+    const r = this.transforming;
     const d = this.draw;
     if (!r || !d?.enabled) return;
-    // 螢幕順時針 = TWD97（y 向北）順時針 = 數學角度取負
-    const t = -(this.screenAngle(r.center, e.point) - r.startAngle);
-    const cos = Math.cos(t);
-    const sin = Math.sin(t);
-    const [cx, cy] = r.center;
+    let transform: (x: number, y: number) => [number, number];
+    if (r.kind === 'rotate') {
+      // 螢幕順時針 = TWD97（y 向北）順時針 = 數學角度取負
+      const t = -(this.screenAngle(r.center, e.point) - r.startAngle);
+      const cos = Math.cos(t);
+      const sin = Math.sin(t);
+      const [cx, cy] = r.center;
+      transform = (x, y) => [cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos];
+    } else {
+      const [mx, my] = lngLatToTwd97(e.lngLat.lng, e.lngLat.lat);
+      const dx = mx - r.startXY[0];
+      const dy = my - r.startXY[1];
+      transform = (x, y) => [x + dx, y + dy];
+    }
     const rings = r.rings.map((ring) =>
       ring.map(([x, y]) => {
-        const p = twd97ToLngLat(cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos);
+        const p = twd97ToLngLat(...transform(x, y));
         return [round(p[0]), round(p[1])];
       }),
     );
@@ -743,14 +845,14 @@ export class DrawTool {
     try {
       d.updateFeatureGeometry(r.id, geometry);
     } catch (err) {
-      console.warn('[draw] 旋轉失敗', err);
+      console.warn(r.kind === 'rotate' ? '[draw] 旋轉失敗' : '[draw] 拖曳失敗', err);
     }
   };
 
-  private handleRotateEnd = () => {
-    window.removeEventListener('mouseup', this.handleRotateEnd);
-    if (!this.rotating) return;
-    this.rotating = null;
+  private handleTransformEnd = () => {
+    window.removeEventListener('mouseup', this.handleTransformEnd);
+    if (!this.transforming) return;
+    this.transforming = null;
     this.updateCursor();
     this.checkpoint();
     this.emit();
@@ -775,7 +877,7 @@ export class DrawTool {
     this.map.off('click', this.handleClick);
     this.map.off('mousedown', this.handleMouseDown);
     this.map.off('mousemove', this.handleMouseMove);
-    this.handleRotateEnd();
+    this.handleTransformEnd();
     this.pointerDown = false;
     this.map.doubleClickZoom.enable();
     this.map.getCanvas().style.cursor = '';
