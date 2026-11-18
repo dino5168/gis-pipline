@@ -26,6 +26,10 @@ import {
 import { PipeAttributeTable } from '../components/PipeAttributeTable';
 import { ScaleBar } from '../components/ScaleBar';
 import { MapZoomControls } from '../components/MapZoomControls';
+import { MeasureControl } from '../components/MeasureControl';
+import { MeasureTool } from './measureTool';
+import type { MeasureResult } from './measure';
+import type { MeasureMode } from '../types/measure';
 import { metersPerPixel } from './cameraScale';
 import { setPointerLngLat } from './pointerCoord';
 import type { ScaleBarSettings } from '../types/scaleBar';
@@ -136,6 +140,21 @@ export function MapView({
   const [popupNode] = useState(() => document.createElement('div'));
   const [selection, setSelection] = useState<Selection | null>(null);
   const [mpp, setMpp] = useState<number | null>(null);
+  // ---- 量測
+  const measureRef = useRef<MeasureTool | null>(null);
+  const [measureOpen, setMeasureOpen] = useState(false);
+  const [measureMode, setMeasureMode] = useState<MeasureMode | null>(null);
+  const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
+  const changeMeasureMode = (mode: MeasureMode | null) => {
+    setMeasureMode(mode);
+    measureRef.current?.setMode(mode);
+  };
+  const closeMeasure = () => {
+    setMeasureOpen(false);
+    changeMeasureMode(null);
+  };
+  const closeMeasureRef = useRef(closeMeasure);
+  closeMeasureRef.current = closeMeasure;
 
   // 用 ref 保存最新的 callback，避免地圖重建
   const cb = useRef({ onZoomChange, onTileError });
@@ -180,10 +199,18 @@ export function MapView({
     map.on('mousemove', (e) => setPointerLngLat({ lng: e.lngLat.lng, lat: e.lngLat.lat }));
     map.getCanvasContainer().addEventListener('mouseleave', () => setPointerLngLat(null));
 
+    // ---- 量測（量測中暫停管線滑過／點選）
+    const measure = new MeasureTool(map, {
+      onChange: setMeasureResult,
+      onExit: () => closeMeasureRef.current(),
+    });
+    measureRef.current = measure;
+
     // ---- 滑過
     let hover: FeatureIdentifier | null = null;
     const sameFeature = (a: FeatureIdentifier, b: FeatureIdentifier) => a.source === b.source && a.id === b.id;
     map.on('mousemove', PIPE_LAYER_IDS, (e) => {
+      if (measure.active) return;
       const f = e.features?.[0];
       if (!f || f.id === undefined) return;
       const fid = featureId({ source: f.source, sourceLayer: f.sourceLayer, id: f.id });
@@ -193,7 +220,7 @@ export function MapView({
       map.setFeatureState(fid, { hover: true });
     });
     map.on('mouseleave', PIPE_LAYER_IDS, () => {
-      map.getCanvas().style.cursor = '';
+      if (!measure.active) map.getCanvas().style.cursor = '';
       if (hover) map.setFeatureState(hover, { hover: false });
       hover = null;
     });
@@ -207,6 +234,7 @@ export function MapView({
       setSelection(null);
     });
     map.on('click', PIPE_LAYER_IDS, (e) => {
+      if (measure.active) return;
       // 多種管線重疊時取最上層的那條
       const f = e.features?.[0];
       if (!f || f.id === undefined || !isPipeKindId(f.sourceLayer)) return;
@@ -218,6 +246,8 @@ export function MapView({
     });
 
     return () => {
+      measure.destroy();
+      measureRef.current = null;
       popup.remove();
       map.remove();
       mapRef.current = null;
@@ -331,6 +361,20 @@ export function MapView({
         onZoomIn={() => mapRef.current?.zoomIn()}
         onReset={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0 })}
         onZoomOut={() => mapRef.current?.zoomOut()}
+      />
+      <MeasureControl
+        open={measureOpen}
+        mode={measureMode}
+        result={measureResult}
+        onToggleOpen={() => {
+          if (measureOpen) closeMeasure();
+          else {
+            // 展開時預設距離量測
+            setMeasureOpen(true);
+            changeMeasureMode('distance');
+          }
+        }}
+        onModeChange={changeMeasureMode}
       />
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
     </div>

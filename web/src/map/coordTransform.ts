@@ -47,6 +47,40 @@ export function lngLatToTwd97(lng: number, lat: number): [number, number] {
   return [x, y];
 }
 
+/** TWD97 TM2（公尺）→ WGS84 經緯度（度），lngLatToTwd97 的反算（Snyder 橫麥卡托反算公式） */
+export function twd97ToLngLat(x: number, y: number): [number, number] {
+  const e4 = E2 * E2;
+  const e6 = e4 * E2;
+  const M = y / K0;
+  const mu = M / (A_AXIS * (1 - E2 / 4 - (3 * e4) / 64 - (5 * e6) / 256));
+  const e1 = (1 - Math.sqrt(1 - E2)) / (1 + Math.sqrt(1 - E2));
+  const phi1 =
+    mu +
+    ((3 * e1) / 2 - (27 * e1 ** 3) / 32) * Math.sin(2 * mu) +
+    ((21 * e1 * e1) / 16 - (55 * e1 ** 4) / 32) * Math.sin(4 * mu) +
+    ((151 * e1 ** 3) / 96) * Math.sin(6 * mu) +
+    ((1097 * e1 ** 4) / 512) * Math.sin(8 * mu);
+  const sin = Math.sin(phi1);
+  const cos = Math.cos(phi1);
+  const tan = Math.tan(phi1);
+  const C1 = EP2 * cos * cos;
+  const T1 = tan * tan;
+  const N1 = A_AXIS / Math.sqrt(1 - E2 * sin * sin);
+  const R1 = (A_AXIS * (1 - E2)) / (1 - E2 * sin * sin) ** 1.5;
+  const D = (x - FALSE_EASTING) / (N1 * K0);
+  const lat =
+    phi1 -
+    ((N1 * tan) / R1) *
+      ((D * D) / 2 -
+        ((5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * EP2) * D ** 4) / 24 +
+        ((61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * EP2 - 3 * C1 * C1) * D ** 6) / 720);
+  const lng =
+    LON0 +
+    (D - ((1 + 2 * T1 + C1) * D ** 3) / 6 + ((5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * EP2 + 24 * T1 * T1) * D ** 5) / 120) /
+      cos;
+  return [(lng * 180) / Math.PI, (lat * 180) / Math.PI];
+}
+
 // TWD97 ↔ TWD67 轉換參數
 const P_A = 0.00001549;
 const P_B = 0.000006521;
