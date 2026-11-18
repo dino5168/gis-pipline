@@ -38,8 +38,26 @@ export const DRAW_IMPLEMENTED_MODES: ReadonlySet<DrawMode> = new Set<DrawMode>([
   'delete',
 ]);
 
-/** 繪圖顏色（第 7 步再做成可設定） */
-export const DRAW_COLOR = '#22d3ee';
+/** 繪圖樣式（設定 → 樣式；套用到所有圖形與文字標註） */
+export interface DrawStyle {
+  /** 線、外框、填色、頂點、文字的顏色（#rrggbb） */
+  color: string;
+  /** 線寬（px） */
+  lineWidth: number;
+  /** 面的填色不透明度（0～1） */
+  fillOpacity: number;
+}
+
+export const DRAW_LINE_WIDTH_RANGE = { min: 1, max: 6, step: 0.5 } as const;
+
+export const DEFAULT_DRAW_STYLE: DrawStyle = {
+  color: '#22d3ee',
+  lineWidth: 2.5,
+  fillOpacity: 0.2,
+};
+
+/** 文字標註的最大字數 */
+export const DRAW_TEXT_MAX_LENGTH = 100;
 
 /** 一個圖形的量測值（TWD97 平面坐標計算） */
 export interface DrawMeasure {
@@ -72,4 +90,6 @@ export interface DrawStatus {
   selected: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  /** 自動儲存到瀏覽器失敗（例如儲存空間不足） */
+  saveFailed: boolean;
 }

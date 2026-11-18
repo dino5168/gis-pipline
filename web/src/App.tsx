@@ -28,6 +28,7 @@ import {
   isHexColor,
   type MeasureStyle,
 } from './types/measure';
+import { DEFAULT_DRAW_STYLE, DRAW_LINE_WIDTH_RANGE, type DrawStyle } from './types/draw';
 import {
   DEFAULT_COORD_DISPLAY,
   LNGLAT_DECIMALS_RANGE,
@@ -114,6 +115,24 @@ function loadMeasureStyle(): MeasureStyle {
   }
 }
 
+// 繪圖樣式（只存在這台瀏覽器；不合法的欄位用預設值）
+const DRAW_STYLE_STORE_KEY = 'utl.drawStyle';
+function loadDrawStyle(): DrawStyle {
+  const d = DEFAULT_DRAW_STYLE;
+  const num = (v: unknown, min: number, max: number, def: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, min), max) : def;
+  try {
+    const v = JSON.parse(localStorage.getItem(DRAW_STYLE_STORE_KEY) ?? '{}') as Partial<DrawStyle>;
+    return {
+      color: isHexColor(v.color) ? v.color : d.color,
+      lineWidth: num(v.lineWidth, DRAW_LINE_WIDTH_RANGE.min, DRAW_LINE_WIDTH_RANGE.max, d.lineWidth),
+      fillOpacity: num(v.fillOpacity, 0, 1, d.fillOpacity),
+    };
+  } catch {
+    return d;
+  }
+}
+
 export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [initialLayout] = useState(loadLayout);
@@ -167,6 +186,14 @@ export default function App() {
       // 無法儲存時忽略
     }
   }, [measureStyle]);
+  const [drawStyle, setDrawStyle] = useState<DrawStyle>(loadDrawStyle);
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRAW_STYLE_STORE_KEY, JSON.stringify(drawStyle));
+    } catch {
+      // 無法儲存時忽略
+    }
+  }, [drawStyle]);
   const pipe3dOptions = useMemo(() => ({ heightMode, section, exaggeration }), [heightMode, section, exaggeration]);
 
   // ---- 3D：第一次切到含 3D 的模式才建立 Cesium，之後保留
@@ -273,6 +300,8 @@ export default function App() {
         onOpenChange={setStyleSettingsOpen}
         measureStyle={measureStyle}
         onMeasureStyleChange={setMeasureStyle}
+        drawStyle={drawStyle}
+        onDrawStyleChange={setDrawStyle}
       />
       <div className="relative flex min-h-0 flex-1">
         <SplitView
@@ -291,6 +320,7 @@ export default function App() {
               colorMode={colorMode}
               scaleBar={scaleBar}
               measureStyle={measureStyle}
+              drawStyle={drawStyle}
               mapRef={mapRef}
               onZoomChange={setZoom}
               onTileError={setTileError}

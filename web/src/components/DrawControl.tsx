@@ -1,6 +1,9 @@
 // 2D 圖台左側中間的繪圖按鈕（量測按鈕下方）：按下「繪圖」向右展開「圖形｜編輯」兩組圖示，下方顯示操作提示。
+import { useRef, useState } from 'react';
+import type { FeatureCollection } from 'geojson';
 import {
   Circle,
+  Download,
   Eraser,
   MapPin,
   Move,
@@ -11,12 +14,15 @@ import {
   RotateCw,
   Scissors,
   Spline,
+  Trash2,
   Type,
   Undo2,
+  Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
+import { DRAW_GEOJSON_MIME } from '../map/drawIO';
 import { formatArea, formatDistance } from '../map/measure';
 import {
   DRAW_EDIT_MODE_NAMES,
@@ -38,6 +44,26 @@ interface Props {
   onToggleOpen: () => void;
   onModeChange: (mode: DrawMode) => void;
   onUndo: () => void;
+  /** 匯入已解析的 GeoJSON，回傳結果訊息 */
+  onImport: (data: unknown) => string;
+  onExport: () => FeatureCollection | null;
+  onClear: () => void;
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** 下載檔名：繪圖-YYYYMMDD-HHmm.geojson */
+function exportFileName(d = new Date()): string {
+  return `繪圖-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.geojson`;
+}
+
+function download(fc: FeatureCollection) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(fc, null, 2)], { type: DRAW_GEOJSON_MIME }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = exportFileName();
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 const MODE_ICONS: Record<DrawMode, LucideIcon> = {
@@ -105,7 +131,27 @@ function measureRows(m: DrawMeasure): [string, string][] {
   return rows;
 }
 
-export function DrawControl({ open, mode, status, onToggleOpen, onModeChange, onUndo }: Props) {
+export function DrawControl({ open, mode, status, onToggleOpen, onModeChange, onUndo, onImport, onExport, onClear }: Props) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  /** 匯入／匯出的結果訊息 */
+  const [notice, setNotice] = useState<string | null>(null);
+  const count = status?.featureCount ?? 0;
+
+  const handleFile = async (file: File) => {
+    try {
+      setNotice(onImport(JSON.parse(await file.text())));
+    } catch (err) {
+      console.warn('[draw] 匯入失敗', err);
+      setNotice(`無法讀取「${file.name}」：不是有效的 GeoJSON 檔`);
+    }
+  };
+
+  const toolButton = (title: string, Icon: LucideIcon, onClick: () => void, disabled = false) => (
+    <Button variant="ghost" size="icon-xs" title={title} aria-label={title} disabled={disabled} onClick={onClick}>
+      <Icon />
+    </Button>
+  );
+
   const modeButton = (m: DrawMode) => {
     const Icon = MODE_ICONS[m];
     const active = mode === m;
@@ -174,7 +220,35 @@ export function DrawControl({ open, mode, status, onToggleOpen, onModeChange, on
                 ))}
               </dl>
             )}
-            <p className="text-muted-foreground/70 mt-1">圖上圖形：{status?.featureCount ?? 0} 個</p>
+            <div className="mt-1 flex items-center gap-0.5">
+              <span className="text-muted-foreground/70 mr-auto">圖上圖形：{count} 個</span>
+              {toolButton('匯入 GeoJSON', Upload, () => fileRef.current?.click())}
+              {toolButton('匯出 GeoJSON', Download, () => {
+                const fc = onExport();
+                if (!fc) return;
+                download(fc);
+                setNotice(`已匯出 ${fc.features.length} 個圖形`);
+              }, count === 0)}
+              {toolButton('清除全部圖形（Ctrl+Z 可復原）', Trash2, () => {
+                onClear();
+                setNotice(`已清除 ${count} 個圖形（Ctrl+Z 可復原）`);
+              }, count === 0)}
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".geojson,.json,application/geo+json,application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) void handleFile(file);
+                }}
+              />
+            </div>
+            {notice && <p className="text-muted-foreground mt-0.5">{notice}</p>}
+            {status?.saveFailed && (
+              <p className="mt-0.5 text-amber-900 dark:text-amber-200">無法自動儲存（瀏覽器儲存空間不足），請匯出備份</p>
+            )}
           </div>
         </>
       )}

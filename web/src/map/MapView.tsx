@@ -30,7 +30,7 @@ import { MeasureControl } from '../components/MeasureControl';
 import { MeasureTool } from './measureTool';
 import { DrawControl } from '../components/DrawControl';
 import { DrawTool } from './drawTool';
-import type { DrawMode, DrawStatus } from '../types/draw';
+import type { DrawMode, DrawStatus, DrawStyle } from '../types/draw';
 import type { MeasureResult } from './measure';
 import type { MeasureMode, MeasureStyle } from '../types/measure';
 import { metersPerPixel } from './cameraScale';
@@ -62,6 +62,8 @@ interface Props {
   scaleBar: ScaleBarSettings;
   /** 量測線條樣式（設定 → 樣式） */
   measureStyle: MeasureStyle;
+  /** 繪圖圖形樣式（設定 → 樣式） */
+  drawStyle: DrawStyle;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
@@ -138,6 +140,7 @@ export function MapView({
   colorMode,
   scaleBar,
   measureStyle,
+  drawStyle,
   mapRef,
   onZoomChange,
   onTileError,
@@ -293,6 +296,9 @@ export function MapView({
   useEffect(() => {
     measureRef.current?.setStyle(measureStyle);
   }, [measureStyle]);
+  useEffect(() => {
+    drawRef.current?.setStyle(drawStyle);
+  }, [drawStyle]);
 
   // ---- 底圖切換
   useEffect(() => {
@@ -432,6 +438,15 @@ export function MapView({
           }}
           onModeChange={changeDrawMode}
           onUndo={() => drawRef.current?.undo()}
+          onImport={(data) => {
+            const r = drawRef.current?.importGeoJSON(data);
+            if (!r) return '繪圖尚未就緒';
+            if (r.bounds) mapRef.current?.fitBounds(r.bounds, { padding: 80, maxZoom: 18 });
+            const skipped = r.skipped ? `，${r.skipped} 個無法匯入（坐標須為 WGS84 經緯度）` : '';
+            return `已匯入 ${r.added} 個圖形${skipped}`;
+          }}
+          onExport={() => drawRef.current?.exportGeoJSON() ?? null}
+          onClear={() => drawRef.current?.clearAll()}
         />
       </div>
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />

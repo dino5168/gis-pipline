@@ -7,7 +7,9 @@
 // 用 MapLibre Marker 顯示（地圖樣式沒有 glyphs，不能用 symbol 文字）；選取／拖曳／刪除／復原沿用點的做法。
 // 挖洞：Terra Draw 多邊形模式另開一個實例（modeName 'cut'）畫刀，畫完由 drawCut.ts 做差集；
 // 有洞的結果是自訂模式 'holed'（不能編輯頂點，拖曳由這裡自己處理）。
-import type { Feature } from 'geojson';
+// 儲存：每次記入復原紀錄時存到 localStorage（utl.drawings），下次開啟自動載入；匯出／匯入 GeoJSON 見 drawIO.ts。
+// 樣式：Terra Draw 的樣式用函式讀取 this.style，改樣式後觸發一次重繪即套用到所有圖形。
+import type { Feature, FeatureCollection } from 'geojson';
 import * as maplibregl from 'maplibre-gl';
 import {
   TerraDraw,
@@ -19,19 +21,23 @@ import {
   TerraDrawSelectMode,
   type GeoJSONStoreFeatures,
   type GeoJSONStoreGeometries,
+  type HexColor,
 } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import { lngLatToTwd97, twd97ToLngLat } from './coordTransform';
 import { CUT_MODE, CUTTABLE_MODES, HOLED_MODE, TerraDrawHoledPolygonMode, cutFeatures } from './drawCut';
+import { parseImport, toExportFeature, toFeatureCollection, type ImportCandidate } from './drawIO';
 import { polygonArea, segmentLengths, type LngLat } from './measure';
 import {
-  DRAW_COLOR,
+  DEFAULT_DRAW_STYLE,
   DRAW_IMPLEMENTED_MODES,
   DRAW_SHAPE_MODE_NAMES,
+  DRAW_TEXT_MAX_LENGTH,
   type DrawMeasure,
   type DrawMode,
   type DrawShapeMode,
   type DrawStatus,
+  type DrawStyle,
 } from '../types/draw';
 
 type FeatureId = string | number;
@@ -43,50 +49,59 @@ const STATIC_MODE = 'static';
 const COORD_PRECISION = 9;
 /** 復原堆疊上限 */
 const MAX_HISTORY = 100;
+/** 自動儲存的 localStorage key（內容為圖形陣列，同復原快照） */
+const STORE_KEY = 'utl.drawings';
 
-/** 圖形樣式（第 7 步改成可設定） */
-const LINE_WIDTH = 2.5;
-const FILL_OPACITY = 0.2;
 const SELECTED_COLOR = '#ffffff';
-const VERTEX = {
-  coordinatePointColor: DRAW_COLOR,
-  coordinatePointWidth: 3,
-  coordinatePointOutlineColor: '#ffffff',
-  coordinatePointOutlineWidth: 1,
-} as const;
-const CLOSING_POINT = {
-  closingPointColor: '#ffffff',
-  closingPointWidth: 4,
-  closingPointOutlineColor: DRAW_COLOR,
-  closingPointOutlineWidth: 2,
-} as const;
-const POLYGON = {
-  fillColor: DRAW_COLOR,
-  fillOpacity: FILL_OPACITY,
-  outlineColor: DRAW_COLOR,
-  outlineWidth: LINE_WIDTH,
-} as const;
-/** 選取中：外框／線改白色，頂點控制點用繪圖色 */
-const SELECTED = {
-  selectedPointColor: SELECTED_COLOR,
-  selectedPointWidth: 6,
-  selectedPointOutlineColor: DRAW_COLOR,
-  selectedPointOutlineWidth: 2,
-  selectedLineStringColor: SELECTED_COLOR,
-  selectedLineStringWidth: LINE_WIDTH + 0.5,
-  selectedPolygonColor: DRAW_COLOR,
-  selectedPolygonFillOpacity: FILL_OPACITY + 0.1,
-  selectedPolygonOutlineColor: SELECTED_COLOR,
-  selectedPolygonOutlineWidth: LINE_WIDTH + 0.5,
-  selectionPointColor: DRAW_COLOR,
-  selectionPointWidth: 5,
-  selectionPointOutlineColor: '#ffffff',
-  selectionPointOutlineWidth: 2,
-  midPointColor: '#ffffff',
-  midPointWidth: 3,
-  midPointOutlineColor: DRAW_COLOR,
-  midPointOutlineWidth: 1,
-} as const;
+
+/** 依目前樣式產生 Terra Draw 的樣式（值是函式，重繪時才讀 s，改樣式不必重建模式） */
+function drawStyles(s: DrawStyle) {
+  const color = () => s.color as HexColor;
+  const width = () => s.lineWidth;
+  const VERTEX = {
+    coordinatePointColor: color,
+    coordinatePointWidth: 3,
+    coordinatePointOutlineColor: '#ffffff',
+    coordinatePointOutlineWidth: 1,
+  } as const;
+  const CLOSING_POINT = {
+    closingPointColor: '#ffffff',
+    closingPointWidth: 4,
+    closingPointOutlineColor: color,
+    closingPointOutlineWidth: 2,
+  } as const;
+  const POLYGON = {
+    fillColor: color,
+    fillOpacity: () => s.fillOpacity,
+    outlineColor: color,
+    outlineWidth: width,
+  } as const;
+  /** 選取中：外框／線改白色，頂點控制點用繪圖色 */
+  const SELECTED = {
+    selectedPointColor: SELECTED_COLOR,
+    selectedPointWidth: 6,
+    selectedPointOutlineColor: color,
+    selectedPointOutlineWidth: 2,
+    selectedLineStringColor: SELECTED_COLOR,
+    selectedLineStringWidth: () => s.lineWidth + 0.5,
+    selectedPolygonColor: color,
+    selectedPolygonFillOpacity: () => Math.min(s.fillOpacity + 0.1, 1),
+    selectedPolygonOutlineColor: SELECTED_COLOR,
+    selectedPolygonOutlineWidth: () => s.lineWidth + 0.5,
+    selectionPointColor: color,
+    selectionPointWidth: 5,
+    selectionPointOutlineColor: '#ffffff',
+    selectionPointOutlineWidth: 2,
+    midPointColor: '#ffffff',
+    midPointWidth: 3,
+    midPointOutlineColor: color,
+    midPointOutlineWidth: 1,
+  } as const;
+  const LINE = { lineStringColor: color, lineStringWidth: width } as const;
+  const POINT = { pointColor: color, pointWidth: 6, pointOutlineColor: '#ffffff', pointOutlineWidth: 2 } as const;
+  const TEXT_POINT = { pointColor: color, pointWidth: 3, pointOutlineColor: '#ffffff', pointOutlineWidth: 1 } as const;
+  return { VERTEX, CLOSING_POINT, POLYGON, SELECTED, LINE, POINT, TEXT_POINT };
+}
 
 /**
  * Esc 由 DrawTool 統一處理，Terra Draw 只保留 Enter 結束、Delete 刪除選取的圖形。
@@ -136,7 +151,6 @@ const SNAP_TO_FEATURE = { toFeature: { filter: snapTarget, toCoordinate: true, t
 
 /** 文字標註 */
 const TEXT_MODE = 'text';
-const TEXT_MAX_LENGTH = 100;
 /** 文字顏色同繪圖色，深色描邊讓文字在各種底圖上都看得清楚 */
 const TEXT_SHADOW = '0 0 2px #000, 0 0 3px #000, 0 0 4px #000';
 /** 文字標籤可以點的模式：選取／拖曳＝選取、刪除＝刪除、文字＝修改文字（其他模式不擋地圖操作） */
@@ -174,7 +188,8 @@ const DRAG_FLAGS = { ...flagsForAll({ draggable: true }), [HOLED_MODE]: { featur
 /** 挖洞的刀：橘色（與繪圖色區分） */
 const CUT_COLOR = '#f97316';
 
-function createModes() {
+function createModes(style: DrawStyle) {
+  const { VERTEX, CLOSING_POINT, POLYGON, SELECTED, LINE, POINT, TEXT_POINT } = drawStyles(style);
   const select = (modeName: string, flags: Record<string, object>) =>
     new TerraDrawSelectMode({
       modeName,
@@ -187,14 +202,14 @@ function createModes() {
     new TerraDrawPointMode({
       pointerDistance: SNAP_PX,
       snapping: SNAP_TO_FEATURE,
-      styles: { pointColor: DRAW_COLOR, pointWidth: 6, pointOutlineColor: '#ffffff', pointOutlineWidth: 2, ...SNAP_POINT },
+      styles: { ...POINT, ...SNAP_POINT },
     }),
     new TerraDrawLineStringMode({
       keyEvents: KEY_EVENTS,
       showCoordinatePoints: true,
       pointerDistance: SNAP_PX,
       snapping: SNAP_TO_FEATURE,
-      styles: { lineStringColor: DRAW_COLOR, lineStringWidth: LINE_WIDTH, ...CLOSING_POINT, ...VERTEX, ...SNAP_POINT },
+      styles: { ...LINE, ...CLOSING_POINT, ...VERTEX, ...SNAP_POINT },
     }),
     new TerraDrawPolygonMode({
       keyEvents: KEY_EVENTS,
@@ -235,7 +250,7 @@ function createModes() {
     // 文字標註：單擊放置位置（小點），再輸入文字；不吸附
     new TerraDrawPointMode({
       modeName: TEXT_MODE,
-      styles: { pointColor: DRAW_COLOR, pointWidth: 3, pointOutlineColor: '#ffffff', pointOutlineWidth: 1 },
+      styles: TEXT_POINT,
     }),
     select('select', EDIT_FLAGS),
     select('drag', DRAG_FLAGS),
@@ -370,6 +385,9 @@ export class DrawTool {
   /** 文字標註的 Marker（feature id → Marker） */
   private textLabels = new Map<FeatureId, maplibregl.Marker>();
   private textEdit: TextEdit | null = null;
+  /** 目前樣式（Terra Draw 的樣式函式直接讀這個物件，setStyle 原地修改） */
+  private readonly style: DrawStyle = { ...DEFAULT_DRAW_STYLE };
+  private saveFailed = false;
   private readonly map: maplibregl.Map;
   private readonly opts: Options;
 
@@ -422,6 +440,7 @@ export class DrawTool {
     if (this.history.length < 2) return;
     this.redoStack.push(this.history.pop()!);
     this.restore(this.history[this.history.length - 1]);
+    this.persist();
   }
 
   redo(): void {
@@ -431,6 +450,93 @@ export class DrawTool {
     if (this.isDrawing()) this.cancelDrawing();
     this.history.push(next);
     this.restore(next);
+    this.persist();
+  }
+
+  /** 套用繪圖樣式（所有圖形與文字標註） */
+  setStyle(next: DrawStyle): void {
+    Object.assign(this.style, next);
+    for (const m of this.textLabels.values()) m.getElement().style.color = this.style.color;
+    // 樣式值是讀 this.style 的函式，只要觸發一次重繪（改任一模式的 styles 會重繪全部圖形）
+    if (this.draw?.enabled) this.draw.updateModeOptions<typeof TerraDrawPointMode>('point', { styles: {} });
+  }
+
+  /** 匯出圖上所有圖形（GeoJSON，EPSG:4326） */
+  exportGeoJSON(): FeatureCollection {
+    const all = this.draw?.getSnapshot() ?? [];
+    return toFeatureCollection(
+      all.filter(isUserFeature).map((f) => toExportFeature(f, f.properties.mode === 'circle' ? measureFeature(f)?.radiusM : undefined)),
+    );
+  }
+
+  /**
+   * 匯入 GeoJSON（已 JSON.parse）加到圖上，可復原。
+   * 回傳加入數、無法匯入數，以及加入圖形的範圍（給地圖縮放過去）。
+   */
+  importGeoJSON(data: unknown): { added: number; skipped: number; bounds: [[number, number], [number, number]] | null } {
+    const d = this.draw;
+    if (!d?.enabled) return { added: 0, skipped: 0, bounds: null };
+    this.endTextEdit(true);
+    if (this.isDrawing()) this.cancelDrawing();
+    this.deselect();
+    const parsed = parseImport(data, COORD_PRECISION);
+    let skipped = parsed.skipped;
+    const added: ImportCandidate[] = [];
+    // 每個圖形依序嘗試候選種類：第一輪全部用首選，驗證不過的下一輪改用下一個種類
+    let pending = parsed.candidates.map((c) => ({ c, i: 0 }));
+    this.restoring = true;
+    try {
+      while (pending.length) {
+        const batch = pending.map(({ c, i }) => ({
+          c,
+          i,
+          f: { ...c.feature, id: crypto.randomUUID(), properties: { ...c.feature.properties, mode: c.modes[i] } },
+        }));
+        const bad = new Set(d.addFeatures(batch.map((b) => b.f)).filter((v) => !v.valid).map((v) => v.id));
+        pending = [];
+        for (const b of batch) {
+          if (!bad.has(b.f.id)) added.push(b.c);
+          else if (b.i + 1 < b.c.modes.length) pending.push({ c: b.c, i: b.i + 1 });
+          else skipped++;
+        }
+      }
+    } finally {
+      this.restoring = false;
+    }
+    let bounds: [[number, number], [number, number]] | null = null;
+    for (const { feature } of added) {
+      const g = feature.geometry;
+      const pts = g.type === 'Point' ? [g.coordinates] : g.type === 'LineString' ? g.coordinates : g.coordinates.flat();
+      for (const [x, y] of pts) {
+        if (!bounds) bounds = [[x, y], [x, y]];
+        else {
+          bounds[0] = [Math.min(bounds[0][0], x), Math.min(bounds[0][1], y)];
+          bounds[1] = [Math.max(bounds[1][0], x), Math.max(bounds[1][1], y)];
+        }
+      }
+    }
+    this.currentId = null;
+    this.countFeatures();
+    this.syncTextLabels();
+    this.checkpoint();
+    this.emit();
+    return { added: added.length, skipped, bounds };
+  }
+
+  /** 清除所有圖形（可復原） */
+  clearAll(): void {
+    const d = this.draw;
+    if (!d?.enabled) return;
+    this.endTextEdit(false);
+    if (this.isDrawing()) this.cancelDrawing();
+    this.deselect();
+    const ids = d.getSnapshot().filter(isUserFeature).map((f) => f.id as FeatureId);
+    if (ids.length) d.removeFeatures(ids);
+    this.currentId = null;
+    this.countFeatures();
+    this.syncTextLabels();
+    this.checkpoint();
+    this.emit();
   }
 
   destroy(): void {
@@ -444,8 +550,9 @@ export class DrawTool {
 
   private init() {
     const adapter = new TerraDrawMapLibreGLAdapter({ map: this.map, prefixId: PREFIX_ID });
-    this.draw = new TerraDraw({ adapter, modes: createModes() });
+    this.draw = new TerraDraw({ adapter, modes: createModes(this.style) });
     this.draw.start();
+    this.loadSaved();
     this.draw.on('change', (ids, type) => this.handleChange(ids, type));
     this.draw.on('finish', (id, ctx) => {
       this.currentId = id;
@@ -554,7 +661,43 @@ export class DrawTool {
     this.history.push(s);
     if (this.history.length > MAX_HISTORY) this.history.shift();
     this.redoStack = [];
+    this.persist();
     this.emit();
+  }
+
+  // ---- 自動儲存（localStorage）
+  /** 載入上次存的圖形（Terra Draw 剛啟動、還沒有圖形時呼叫） */
+  private loadSaved() {
+    const d = this.draw;
+    if (!d?.enabled) return;
+    let saved: unknown;
+    try {
+      saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]');
+    } catch (err) {
+      console.warn('[draw] 讀取儲存的圖形失敗', err);
+      return;
+    }
+    if (!Array.isArray(saved) || saved.length === 0) return;
+    this.restoring = true;
+    try {
+      const bad = d.addFeatures(saved as GeoJSONStoreFeatures[]).filter((v) => !v.valid);
+      if (bad.length) console.warn('[draw] 有儲存的圖形無法載入', bad);
+    } catch (err) {
+      console.warn('[draw] 載入儲存的圖形失敗', err);
+    } finally {
+      this.restoring = false;
+    }
+  }
+
+  /** 把目前狀態（復原紀錄最後一筆）存起來 */
+  private persist() {
+    try {
+      localStorage.setItem(STORE_KEY, this.history[this.history.length - 1] ?? '[]');
+      this.saveFailed = false;
+    } catch (err) {
+      console.warn('[draw] 自動儲存失敗', err);
+      this.saveFailed = true;
+    }
   }
 
   private restore(json: string) {
@@ -624,7 +767,7 @@ export class DrawTool {
   private createTextLabel(id: FeatureId): HTMLElement {
     const el = document.createElement('div');
     el.className = 'rounded px-1 text-sm leading-tight font-semibold whitespace-pre select-none ring-white/80';
-    el.style.color = DRAW_COLOR;
+    el.style.color = this.style.color;
     el.style.textShadow = TEXT_SHADOW;
     // 標籤不在 canvas 上，Terra Draw 收不到，點選自己處理；不讓事件帶動地圖（拖曳、雙擊放大）
     for (const type of ['mousedown', 'pointerdown', 'dblclick'] as const)
@@ -660,7 +803,7 @@ export class DrawTool {
     if (!f || f.geometry.type !== 'Point') return;
     const input = document.createElement('input');
     input.type = 'text';
-    input.maxLength = TEXT_MAX_LENGTH;
+    input.maxLength = DRAW_TEXT_MAX_LENGTH;
     input.placeholder = '輸入文字，Enter 確定';
     input.value = typeof f.properties.text === 'string' ? f.properties.text : '';
     input.className =
@@ -746,6 +889,7 @@ export class DrawTool {
       selected: this.selectedId !== null,
       canUndo: this.history.length > 1 || this.isDrawing() || this.textEdit !== null,
       canRedo: this.redoStack.length > 0,
+      saveFailed: this.saveFailed,
     });
   }
 

@@ -70,7 +70,7 @@ function polygonsArea(polys: Position[][][]): number {
 }
 
 /** 四捨五入到 precision、去掉連續重複點、首尾閉合；不足 3 個不同點回傳 null */
-function cleanRing(ring: Position[], precision: number): Position[] | null {
+export function cleanRing(ring: Position[], precision: number): Position[] | null {
   const out: Position[] = [];
   for (const p of ring) {
     const q = [Number(p[0].toFixed(precision)), Number(p[1].toFixed(precision))];
