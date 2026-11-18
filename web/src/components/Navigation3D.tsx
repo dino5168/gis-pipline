@@ -1,8 +1,7 @@
 // 3D 圖台的瀏覽輔助：下方正中間的立體導覽元件（小 Cesium 畫面，見 map/cesium/NavGizmo.ts）＋右上角的放大／重設視角／縮小。
 // 立體元件：左右拖曳轉方位、上下拖曳改俯仰（環繞畫面中心的地面點）；雙擊 N 轉正北；點天頂軸轉成正上方俯視。
 import { useEffect, useRef, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Minus, Plus, RotateCcw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { MapZoomControls } from './MapZoomControls';
 import type { CesiumScene } from '../map/cesium/CesiumScene';
 import type { NavGizmoHandle } from '../map/cesium/NavGizmo';
 
@@ -107,23 +106,12 @@ export function Navigation3D({ scene }: { scene: CesiumScene }) {
         title="左右拖曳轉方位、上下拖曳改俯仰；雙擊 N 轉正北；點天頂軸俯視"
       />
 
-      <div className="bg-card/75 absolute top-3 right-3 z-40 flex flex-col overflow-hidden rounded-md shadow-sm backdrop-blur-sm">
-        <Button variant="ghost" size="icon" title="放大" aria-label="放大" onClick={() => scene.zoomBy(ZOOM_STEP)}>
-          <Plus />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          title="重設視角（正北朝上、正上方俯視）"
-          aria-label="重設視角"
-          onClick={() => scene.resetView()}
-        >
-          <RotateCcw />
-        </Button>
-        <Button variant="ghost" size="icon" title="縮小" aria-label="縮小" onClick={() => scene.zoomBy(1 / ZOOM_STEP)}>
-          <Minus />
-        </Button>
-      </div>
+      <MapZoomControls
+        onZoomIn={() => scene.zoomBy(ZOOM_STEP)}
+        onReset={() => scene.resetView()}
+        onZoomOut={() => scene.zoomBy(1 / ZOOM_STEP)}
+        resetTitle="重設視角（正北朝上、正上方俯視）"
+      />
     </>
   );
 }

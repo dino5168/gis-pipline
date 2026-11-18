@@ -25,6 +25,7 @@ import {
 } from './pipeStyle';
 import { PipeAttributeTable } from '../components/PipeAttributeTable';
 import { ScaleBar } from '../components/ScaleBar';
+import { MapZoomControls } from '../components/MapZoomControls';
 import { metersPerPixel } from './cameraScale';
 import { setPointerLngLat } from './pointerCoord';
 import type { ScaleBarSettings } from '../types/scaleBar';
@@ -149,7 +150,7 @@ export function MapView({
       zoom: 15,
       maxZoom: 21,
       // 2D 圖台只做 2D：傾斜功能先停用（保留旋轉）。要恢復傾斜：改回 maxPitch: MAP_MAX_PITCH，
-      // 並拿掉 pitchWithRotate / touchPitch 兩行、NavigationControl 的 visualizePitch: false。
+      // 並拿掉 pitchWithRotate / touchPitch 兩行（MapZoomControls 的重設視角會一併歸零傾斜）。
       // maxPitch: MAP_MAX_PITCH,
       maxPitch: 0,
       pitchWithRotate: false, // 右鍵／Ctrl 拖曳只旋轉，不傾斜
@@ -159,8 +160,7 @@ export function MapView({
       attributionControl: false,
     });
     mapRef.current = map;
-    // 傾斜停用：指北針只表示旋轉（拖曳指北針也不會傾斜）
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
+    // 放大／重設視角／縮小改用與 3D 相同的 MapZoomControls（取代 MapLibre 內建 NavigationControl）
 
     const reportZoom = () => cb.current.onZoomChange(map.getZoom());
     map.on('zoom', reportZoom);
@@ -327,6 +327,11 @@ export function MapView({
           <PipeAttributeTable title={PIPE_KIND_BY_ID[selection.kind].name} id={selection.id} props={selection.props} />,
           popupNode,
         )}
+      <MapZoomControls
+        onZoomIn={() => mapRef.current?.zoomIn()}
+        onReset={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0 })}
+        onZoomOut={() => mapRef.current?.zoomOut()}
+      />
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
     </div>
   );
