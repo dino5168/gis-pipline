@@ -47,10 +47,10 @@ const HEMI_ALPHA = 0.1;
 const HEMI_ALPHA_UNDERGROUND = 0.35;
 
 const LABELS: { text: string; bearing: number; color: Color; size: number }[] = [
-  { text: 'N', bearing: 0, color: Color.fromCssColorString('#ff4d4f'), size: 16 },
-  { text: 'E', bearing: 90, color: Color.WHITE, size: 12 },
-  { text: 'S', bearing: 180, color: Color.WHITE, size: 12 },
-  { text: 'W', bearing: 270, color: Color.WHITE, size: 12 },
+  { text: 'N', bearing: 0, color: Color.fromCssColorString('#ff4d4f'), size: 32 },
+  { text: 'E', bearing: 90, color: Color.WHITE, size: 24 },
+  { text: 'S', bearing: 180, color: Color.WHITE, size: 24 },
+  { text: 'W', bearing: 270, color: Color.WHITE, size: 24 },
 ];
 
 /** ENU 平面上方位角（度，北 0、順時針）、半徑對應的位置 */
@@ -173,7 +173,7 @@ export class NavGizmo implements NavGizmoHandle {
         font: `700 ${l.size}px sans-serif`,
         fillColor: l.color,
         outlineColor: Color.BLACK,
-        outlineWidth: 3,
+        outlineWidth: 5,
         style: LabelStyle.FILL_AND_OUTLINE,
         horizontalOrigin: HorizontalOrigin.CENTER,
         verticalOrigin: VerticalOrigin.CENTER,

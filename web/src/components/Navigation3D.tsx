@@ -1,4 +1,4 @@
-// 3D 圖台右上角的瀏覽輔助：立體導覽元件（小 Cesium 畫面，見 map/cesium/NavGizmo.ts）＋放大／重設視角／縮小。
+// 3D 圖台的瀏覽輔助：下方正中間的立體導覽元件（小 Cesium 畫面，見 map/cesium/NavGizmo.ts）＋右上角的放大／重設視角／縮小。
 // 立體元件：左右拖曳轉方位、上下拖曳改俯仰（環繞畫面中心的地面點）；雙擊 N 轉正北；點天頂軸轉成正上方俯視。
 import { useEffect, useRef, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
@@ -7,7 +7,7 @@ import type { CesiumScene } from '../map/cesium/CesiumScene';
 import type { NavGizmoHandle } from '../map/cesium/NavGizmo';
 
 /** 立體元件尺寸（px） */
-const SIZE = 110;
+const SIZE = 250;
 /** 拖曳每像素旋轉的角度（弧度） */
 const DRAG_RAD_PER_PX = 0.01;
 /** 移動超過這個距離才算拖曳 */
@@ -91,11 +91,12 @@ export function Navigation3D({ scene }: { scene: CesiumScene }) {
   };
 
   return (
-    <div className="absolute top-3 right-3 z-40 flex flex-col items-center gap-2">
+    // 立體元件置於畫面下方正中間；放大／重設／縮小按鈕留在右上角
+    <>
       <div
         ref={box}
         style={{ width: SIZE, height: SIZE }}
-        className="cursor-default touch-none select-none"
+        className="absolute bottom-3 left-1/2 z-40 -translate-x-1/2 cursor-default touch-none select-none"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -106,7 +107,7 @@ export function Navigation3D({ scene }: { scene: CesiumScene }) {
         title="左右拖曳轉方位、上下拖曳改俯仰；雙擊 N 轉正北；點天頂軸俯視"
       />
 
-      <div className="bg-card/75 flex flex-col overflow-hidden rounded-md shadow-sm backdrop-blur-sm">
+      <div className="bg-card/75 absolute top-3 right-3 z-40 flex flex-col overflow-hidden rounded-md shadow-sm backdrop-blur-sm">
         <Button variant="ghost" size="icon" title="放大" aria-label="放大" onClick={() => scene.zoomBy(ZOOM_STEP)}>
           <Plus />
         </Button>
@@ -123,6 +124,6 @@ export function Navigation3D({ scene }: { scene: CesiumScene }) {
           <Minus />
         </Button>
       </div>
-    </div>
+    </>
   );
 }
