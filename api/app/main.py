@@ -43,8 +43,12 @@ def health() -> dict:
 
 # 可查詢的管線資料表（一種管線一張表，名稱與 Martin 圖磚 source 相同）。只接受這裡列出的名稱。
 PIPE_LAYERS = {
-    "utl_pipe": "管線（類別碼 8040101）",
+    "utl_pipe": "污水下水道管線（類別碼 8040101）",
     "utl_tel_pipe": "一般電信系統管線（類別碼 8010101）",
+    "utl_cable_duct": "纜線管路（綜合管線，類別碼 8080401）",
+    "utl_catv_pipe": "有線電視系統管線（電信，類別碼 8010401）",
+    "utl_police_pipe": "警訊系統管線（電信，類別碼 8010301）",
+    "utl_tel06_pipe": "電信小類 06 管線（類別碼 8010601，小類名稱待確認）",
 }
 LayerParam = Query("utl_pipe", description="管線資料表：" + "、".join(PIPE_LAYERS))
 

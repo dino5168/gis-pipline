@@ -2,7 +2,7 @@
 # 啟動：.\start-martin.ps1（會從 pgpass.conf 讀取密碼並設定環境變數 MARTIN_PG_URL）
 #
 # 圖磚網址：
-#   TileJSON  http://127.0.0.1:3000/utl_pipe（電信：utl_tel_pipe）
+#   TileJSON  http://127.0.0.1:3000/utl_pipe（電信：utl_tel_pipe、纜線管路：utl_cable_duct、有線電視：utl_catv_pipe、警訊：utl_police_pipe、電信小類 06：utl_tel06_pipe）
 #   圖磚      http://127.0.0.1:3000/utl_pipe/{z}/{x}/{y}
 #   目錄      http://127.0.0.1:3000/catalog
 
@@ -56,6 +56,144 @@ postgres:
       geometry_type: LINESTRING
       id_column: gid
       minzoom: 15
+      maxzoom: 22
+      extent: 4096
+      buffer: 64
+      clip_geom: true
+      properties:
+        feat_id: text
+        class_code: text
+        start_no: text
+        end_no: text
+        mgmt_unit: text
+        op_type: int4
+        set_date: date
+        pipe_no: text
+        size_unit: int4
+        dia_width: float8
+        dia_height: float8
+        pipe_count: int4
+        material: text
+        start_dep: float8
+        end_dep: float8
+        pipe_len: float8
+        pipe_type: int4
+        use_stat: int4
+        data_stat: int4
+        remark: text
+
+    # 纜線管路（綜合管線，類別碼 8080401，1,326 筆）→ minzoom 12，前端須一致
+    utl_cable_duct:
+      schema: public
+      table: utl_cable_duct
+      srid: 3826
+      geometry_column: geom
+      geometry_type: LINESTRING
+      id_column: gid
+      minzoom: 12
+      maxzoom: 22
+      extent: 4096
+      buffer: 64
+      clip_geom: true
+      properties:
+        feat_id: text
+        class_code: text
+        start_no: text
+        end_no: text
+        mgmt_unit: text
+        op_type: int4
+        set_date: date
+        pipe_no: text
+        size_unit: int4
+        dia_width: float8
+        dia_height: float8
+        pipe_count: int4
+        material: text
+        start_dep: float8
+        end_dep: float8
+        pipe_len: float8
+        pipe_type: int4
+        use_stat: int4
+        data_stat: int4
+        remark: text
+
+    # 有線電視系統管線（電信，類別碼 8010401，14,754 筆）→ minzoom 12，前端須一致
+    utl_catv_pipe:
+      schema: public
+      table: utl_catv_pipe
+      srid: 3826
+      geometry_column: geom
+      geometry_type: LINESTRING
+      id_column: gid
+      minzoom: 12
+      maxzoom: 22
+      extent: 4096
+      buffer: 64
+      clip_geom: true
+      properties:
+        feat_id: text
+        class_code: text
+        start_no: text
+        end_no: text
+        mgmt_unit: text
+        op_type: int4
+        set_date: date
+        pipe_no: text
+        size_unit: int4
+        dia_width: float8
+        dia_height: float8
+        pipe_count: int4
+        material: text
+        start_dep: float8
+        end_dep: float8
+        pipe_len: float8
+        pipe_type: int4
+        use_stat: int4
+        data_stat: int4
+        remark: text
+
+    # 警訊系統管線（電信，類別碼 8010301，1,967 筆）→ minzoom 12，前端須一致
+    utl_police_pipe:
+      schema: public
+      table: utl_police_pipe
+      srid: 3826
+      geometry_column: geom
+      geometry_type: LINESTRING
+      id_column: gid
+      minzoom: 12
+      maxzoom: 22
+      extent: 4096
+      buffer: 64
+      clip_geom: true
+      properties:
+        feat_id: text
+        class_code: text
+        start_no: text
+        end_no: text
+        mgmt_unit: text
+        op_type: int4
+        set_date: date
+        pipe_no: text
+        size_unit: int4
+        dia_width: float8
+        dia_height: float8
+        pipe_count: int4
+        material: text
+        start_dep: float8
+        end_dep: float8
+        pipe_len: float8
+        pipe_type: int4
+        use_stat: int4
+        data_stat: int4
+        remark: text
+    utl_tel06_pipe:
+      schema: public
+      table: utl_tel06_pipe
+      srid: 3826
+      geometry_column: geom
+      geometry_type: LINESTRING
+      id_column: gid
+      minzoom: 12
       maxzoom: 22
       extent: 4096
       buffer: 64

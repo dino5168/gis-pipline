@@ -6,3 +6,8 @@ __pycache__/
 *.pyc
 tiles/tools/
 *.tsbuildinfo
+
+# 原始資料（XML 很大，不進 git；下載到 repo 外的 99-Data）
+*.xml
+*.XML
+99-Data/

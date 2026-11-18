@@ -26,6 +26,7 @@ FIELD_MAP: dict[str, tuple[str, str, int, int]] = {
     "作業區分":     ("OP_TYPE",    "N", 4, 0),
     "設置日期":     ("SET_DATE",   "D", 8, 0),
     "管線編號":     ("PIPE_NO",    "C", 30, 0),
+    "管道編號":     ("PIPE_NO",    "C", 30, 0),   # 纜線管路（8080401，綜合管線）用此名；匯入用 --prefix utl_cable_，對應同一欄
     "尺寸單位":     ("SIZE_UNIT",  "N", 4, 0),
     "管徑寬度":     ("DIA_WIDTH",  "N", 12, 3),
     "管徑高度":     ("DIA_HEIGHT", "N", 12, 3),
@@ -75,7 +76,7 @@ VALUE_ALIASES: dict[str, dict[str, str]] = {
 }
 
 # 圖徵類型 → 輸出名稱（Shapefile 檔名後綴 / PostGIS 資料表名）
-FEATURE_SUFFIX = {"UTL_管線": "PIPE"}
+FEATURE_SUFFIX = {"UTL_管線": "PIPE", "UTL_管道": "DUCT"}
 
 
 def local(tag: str) -> str:
