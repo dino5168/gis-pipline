@@ -3,6 +3,7 @@
 // 載入前必須先設定 window.CESIUM_BASE_URL（見 CesiumView.tsx）。
 import {
   BoxGeometry,
+  CameraEventType,
   Cartesian2,
   Cartesian3,
   Cartographic,
@@ -16,6 +17,7 @@ import {
   HeadingPitchRange,
   ImageryLayer,
   IntersectionTests,
+  KeyboardEventModifier,
   Math as CesiumMath,
   Matrix3,
   Matrix4,
@@ -38,6 +40,7 @@ import { OVERLAYS, OVERLAY_IDS, type OverlayId } from '../overlays';
 import { TERRAINS, type TerrainId } from '../terrain';
 import { createHillshadeImagery, createTerrariumSource, createTerrariumTerrain } from './terrariumTerrain';
 import { MATERIALS, OTHER_CODE, OTHER_MATERIAL } from '../pipeStyle';
+import { NavGizmo, type NavGizmoHandle } from './NavGizmo';
 import { metersPerPixel, zoomFromMetersPerPixel } from '../cameraScale';
 import { MAP_MAX_PITCH, PIPE3D_MAX_DEPTH, PIPE3D_MAX_SPAN, TAIPEI_CENTER } from '../../config';
 import type { CameraView } from '../../types/view';
@@ -72,6 +75,10 @@ export interface PipePickId {
 }
 
 const clampDepth = (d: number | null) => Math.min(Math.max(d ?? 0, 0), PIPE3D_MAX_DEPTH);
+/** 不允許地面下時，指北針旋轉的最低仰角（度）：鏡頭至少比環繞中心高這個角度 */
+const ORBIT_MIN_ELEVATION_DEG = 5;
+/** 按鈕（放大／縮小／重設／轉正北／俯視）平滑飛行的時間（ms） */
+const FLY_MS = 400;
 
 /** MapLibre 的點陣圖磚來源 → Cesium 圖層（共用同一組 WMTS／XYZ 網址） */
 function rasterLayer(src: RasterSourceSpecification, options?: { alpha?: number; show?: boolean }): ImageryLayer {
@@ -187,8 +194,18 @@ export class CesiumScene {
     const { scene } = this.viewer;
     scene.globe.baseColor = Color.fromCssColorString('#f6f8fa');
     scene.globe.depthTestAgainstTerrain = true;
-    // 允許鏡頭進到地面下
-    scene.screenSpaceCameraController.enableCollisionDetection = false;
+    // 預設鏡頭不進地面下（setUnderground 可開啟）
+    scene.screenSpaceCameraController.enableCollisionDetection = true;
+    // 滑鼠操作：左鍵拖曳平移、右鍵拖曳旋轉（左右轉方位、上下改俯仰）、滾輪縮放。
+    // Cesium 預設右鍵是縮放、中鍵是旋轉；中鍵與 Ctrl＋左鍵仍保留為旋轉。
+    const ctrl = scene.screenSpaceCameraController;
+    ctrl.zoomEventTypes = [CameraEventType.WHEEL, CameraEventType.PINCH];
+    ctrl.tiltEventTypes = [
+      CameraEventType.RIGHT_DRAG,
+      CameraEventType.MIDDLE_DRAG,
+      CameraEventType.PINCH,
+      { eventType: CameraEventType.LEFT_DRAG, modifier: KeyboardEventModifier.CTRL },
+    ];
     // 固定光源（預設是依時間的太陽，夜間時管線會變暗）：從東南方高處照下
     const enu = Transforms.eastNorthUpToFixedFrame(Cartesian3.fromDegrees(TAIPEI_CENTER[0], TAIPEI_CENTER[1]));
     const lightFrom = Matrix4.multiplyByPointAsVector(enu, new Cartesian3(0.4, -0.6, 1), new Cartesian3());
@@ -196,6 +213,7 @@ export class CesiumScene {
   }
 
   destroy() {
+    cancelAnimationFrame(this.flight);
     if (!this.viewer.isDestroyed()) this.viewer.destroy();
   }
 
@@ -406,59 +424,108 @@ export class CesiumScene {
     this.viewer.scene.requestRender();
   }
 
-  /**
-   * 東(X)、北(Y)、上(Z) 三個軸在畫面上的方向：x 向右、y 向上（單位向量投影，長度 ≤ 1），
-   * depth > 0 表示軸指向遠離觀看者。
-   */
-  axesOnScreen(): Record<'x' | 'y' | 'z', { x: number; y: number; depth: number }> {
-    const { camera } = this.viewer;
-    const enu = Transforms.eastNorthUpToFixedFrame(this.orbitTarget());
-    const axis = (unit: Cartesian3) => {
-      const a = Matrix4.multiplyByPointAsVector(enu, unit, new Cartesian3());
-      return {
-        x: Cartesian3.dot(a, camera.rightWC),
-        y: Cartesian3.dot(a, camera.upWC),
-        depth: Cartesian3.dot(a, camera.directionWC),
-      };
-    };
-    return { x: axis(Cartesian3.UNIT_X), y: axis(Cartesian3.UNIT_Y), z: axis(Cartesian3.UNIT_Z) };
+  /** 拖曳期間固定的環繞中心（每次移動都重抓的話，視角壓低時中心會跳到遠處，畫面亂甩） */
+  private orbitPivot: Cartesian3 | null = null;
+
+  /** 開始拖曳旋轉：記下環繞中心，直到 endOrbit 都不變 */
+  beginOrbit() {
+    cancelAnimationFrame(this.flight);
+    this.orbitPivot = this.orbitTarget();
   }
 
-  /** 繞環繞中心旋轉：dHeading 向右轉、dPitch 往上抬（弧度）。俯仰限制在正上方到正下方之間 */
+  endOrbit() {
+    this.orbitPivot = null;
+  }
+
+  /**
+   * 繞環繞中心旋轉：dHeading 向右轉、dPitch 往上抬（弧度）。
+   * 俯仰：允許地面下時為正上方到正下方；否則限制在正上方俯視到接近水平（鏡頭保持在地面上）。
+   */
   orbit(dHeading: number, dPitch: number) {
     const { camera } = this.viewer;
-    const target = this.orbitTarget();
+    const target = this.orbitPivot ?? this.orbitTarget();
     const range = Cartesian3.distance(camera.positionWC, target);
     const limit = CesiumMath.toRadians(89.9);
-    const pitch = Math.min(Math.max(camera.pitch + dPitch, -limit), limit);
+    const max = this.underground ? limit : -CesiumMath.toRadians(ORBIT_MIN_ELEVATION_DEG);
+    const pitch = Math.min(Math.max(camera.pitch + dPitch, -limit), max);
     this.lookAtTarget(target, camera.heading + dHeading, pitch, range);
   }
 
-  /**
-   * 從某個軸向看向環繞中心（距離不變）：
-   * +Z 正上方俯視、-Z 正下方仰視；±X 從東／西側、±Y 從北／南側水平看。
-   */
-  viewFromAxis(axis: 'x' | 'y' | 'z', positive: boolean) {
+  private underground = false;
+
+  /** 是否允許鏡頭進入地面下（關閉時，若鏡頭已在地面下就回到俯視） */
+  setUnderground(allow: boolean) {
+    this.underground = allow;
+    this.viewer.scene.screenSpaceCameraController.enableCollisionDetection = !allow;
+    if (!allow && this.viewer.camera.positionCartographic.height <= 0) this.resetView();
+    this.requestRender();
+  }
+
+  /** 進行中的平滑飛行（requestAnimationFrame id） */
+  private flight = 0;
+
+  /** 以環繞中心為準，平滑移到指定的方位、俯仰與距離（方位走最短方向、距離等比內插） */
+  private flyAround(target: Cartesian3, heading: number, pitch: number, range: number) {
+    cancelAnimationFrame(this.flight);
     const { camera } = this.viewer;
+    const h0 = camera.heading, p0 = camera.pitch;
+    const r0 = Math.max(Cartesian3.distance(camera.positionWC, target), 1);
+    const dh = CesiumMath.negativePiToPi(heading - h0);
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min((now - t0) / FLY_MS, 1);
+      const e = 1 - (1 - t) ** 3; // ease-out
+      this.lookAtTarget(target, h0 + dh * e, p0 + (pitch - p0) * e, r0 * (range / r0) ** e);
+      if (t < 1) this.flight = requestAnimationFrame(step);
+    };
+    this.flight = requestAnimationFrame(step);
+  }
+
+  private currentRange(target: Cartesian3): number {
+    return Cartesian3.distance(this.viewer.camera.positionWC, target);
+  }
+
+  /** 轉為正北方向（俯仰與距離不變） */
+  faceNorth() {
     const target = this.orbitTarget();
-    const range = Cartesian3.distance(camera.positionWC, target);
-    const right = CesiumMath.PI_OVER_TWO;
-    if (axis === 'z') {
-      // 俯視／仰視保留目前方位
-      this.lookAtTarget(target, camera.heading, positive ? -right + 1e-4 : right - 1e-4, range);
-      return;
-    }
-    // 鏡頭在 +X（東）側要朝西看，方位 270°；以此類推
-    const heading = axis === 'x' ? (positive ? 3 * right : right) : positive ? Math.PI : 0;
-    this.lookAtTarget(target, heading, 0, range);
+    this.flyAround(target, 0, this.viewer.camera.pitch, this.currentRange(target));
+  }
+
+  /** 轉成正上方俯視（方位與距離不變） */
+  lookStraightDown() {
+    const target = this.orbitTarget();
+    this.flyAround(target, this.viewer.camera.heading, -CesiumMath.PI_OVER_TWO + 1e-4, this.currentRange(target));
+  }
+
+  /** 重設視角：回到與 2D 相同的初始狀態——正北朝上、正上方俯視（中心與距離不變） */
+  resetView() {
+    const target = this.orbitTarget();
+    this.flyAround(target, 0, -CesiumMath.PI_OVER_TWO + 1e-4, this.currentRange(target));
   }
 
   /** 朝環繞中心拉近（factor < 1）或拉遠（factor > 1） */
   zoomBy(factor: number) {
     const { camera } = this.viewer;
     const target = this.orbitTarget();
-    const range = Cartesian3.distance(camera.positionWC, target);
-    this.lookAtTarget(target, camera.heading, camera.pitch, Math.max(range * factor, 1));
+    this.flyAround(target, camera.heading, camera.pitch, Math.max(this.currentRange(target) * factor, 1));
+  }
+
+  /** 在 container 裡建立立體導覽元件，角度隨主畫面鏡頭同步 */
+  createNavGizmo(container: HTMLElement): NavGizmoHandle {
+    const gizmo = new NavGizmo(container);
+    const sync = () => {
+      const { camera } = this.viewer;
+      gizmo.update(camera.heading, camera.pitch, camera.positionCartographic.height < 0);
+    };
+    sync();
+    const off = this.onCameraChange(sync);
+    return {
+      pick: (x, y) => gizmo.pick(x, y),
+      destroy: () => {
+        off();
+        gizmo.destroy();
+      },
+    };
   }
 
   /** 鏡頭停止移動時通知；回傳取消函式 */

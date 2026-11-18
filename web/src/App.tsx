@@ -110,6 +110,7 @@ export default function App() {
   const [exaggeration, setExaggeration] = useState(5);
   const [groundOpacity, setGroundOpacity] = useState(GROUND_OPACITY_DEFAULT);
   const [showFps, setShowFps] = useState(false);
+  const [underground, setUnderground] = useState(false);
   const [pipe3dStatus, setPipe3dStatus] = useState<Pipe3DStatus>({ kind: 'off' });
   const [scaleBar, setScaleBar] = useState<ScaleBarSettings>(loadScaleBar);
   const [scaleSettingsOpen, setScaleSettingsOpen] = useState(false);
@@ -211,6 +212,8 @@ export default function App() {
         onTerrainExaggerationChange={setTerrainExaggeration}
         groundOpacity={groundOpacity}
         onGroundOpacityChange={setGroundOpacity}
+        underground={underground}
+        onUndergroundChange={setUnderground}
         showFps={showFps}
         onShowFpsChange={setShowFps}
         status={pipe3dStatus}
@@ -262,6 +265,7 @@ export default function App() {
                 colorMode={colorMode}
                 pipe3dOptions={pipe3dOptions}
                 groundOpacity={groundOpacity}
+                underground={underground}
                 showFps={showFps}
                 scaleBar={scaleBar}
                 mapRef={mapRef}

@@ -41,6 +41,9 @@ interface Props {
   /** 地面不透明度 0～1 */
   groundOpacity: number;
   onGroundOpacityChange: (v: number) => void;
+  /** 允許鏡頭進入地面下 */
+  underground: boolean;
+  onUndergroundChange: (v: boolean) => void;
   /** 左上角顯示 FPS（效能量測用） */
   showFps: boolean;
   onShowFpsChange: (v: boolean) => void;
@@ -135,13 +138,20 @@ export function Pipe3DSettingsDrawer(p: Props) {
             <Slider min={0} max={1} step={0.05} value={[p.groundOpacity]} onValueChange={([v]) => p.onGroundOpacityChange(v)} />
           </div>
           <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="pipe3d-underground" className={SECTION_LABEL}>
+              允許鏡頭進入地面下（從地底往上看管線）
+            </Label>
+            <Switch id="pipe3d-underground" checked={p.underground} onCheckedChange={p.onUndergroundChange} />
+          </div>
+          <div className="flex items-center justify-between gap-2">
             <Label htmlFor="pipe3d-fps" className={SECTION_LABEL}>
               顯示 FPS（效能量測，畫面靜止時不更新）
             </Label>
             <Switch id="pipe3d-fps" checked={p.showFps} onCheckedChange={p.onShowFpsChange} />
           </div>
           <div className="text-muted-foreground text-xs">
-            左鍵拖曳平移、右鍵拖曳或滾輪縮放、中鍵（或 Ctrl＋左鍵）拖曳旋轉傾斜；可以把鏡頭移到地面下。
+            左鍵拖曳平移、右鍵拖曳或滾輪縮放、中鍵（或 Ctrl＋左鍵）拖曳旋轉傾斜。
+            {p.underground ? '鏡頭可以移到地面下。' : '鏡頭保持在地面上；要從地底看請開啟上面的「允許鏡頭進入地面下」。'}
           </div>
           <Pipe3DStatusLine status={p.status} />
         </div>

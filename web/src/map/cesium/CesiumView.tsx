@@ -36,6 +36,8 @@ interface Props {
   pipe3dOptions: Pipe3DOptions;
   /** 地面不透明度 0～1 */
   groundOpacity: number;
+  /** 允許鏡頭進入地面下 */
+  underground: boolean;
   /** 左上角顯示 FPS（效能量測用） */
   showFps: boolean;
   scaleBar: ScaleBarSettings;
@@ -95,6 +97,7 @@ export function CesiumView(p: Props) {
   useEffect(() => scene?.setTerrainExaggeration(p.terrainExaggeration), [scene, p.terrainExaggeration]);
   useEffect(() => scene?.setGroundOpacity(p.groundOpacity), [scene, p.groundOpacity]);
   useEffect(() => scene?.setShowFps(p.showFps), [scene, p.showFps]);
+  useEffect(() => scene?.setUnderground(p.underground), [scene, p.underground]);
 
   // ---- 管線選項、材料篩選
   useEffect(() => scene?.setPipeOptions(p.pipe3dOptions), [scene, p.pipe3dOptions]);
