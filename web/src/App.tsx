@@ -20,6 +20,14 @@ import type { ViewMode } from './types/view';
 import { ScaleBarSettingsDrawer } from './components/ScaleBarSettingsDrawer';
 import { CoordinateDisplay } from './components/CoordinateDisplay';
 import { CoordSettingsDrawer } from './components/CoordSettingsDrawer';
+import { StyleSettingsDrawer } from './components/StyleSettingsDrawer';
+import {
+  DEFAULT_MEASURE_STYLE,
+  MEASURE_LINE_STYLES,
+  MEASURE_LINE_WIDTH_RANGE,
+  isHexColor,
+  type MeasureStyle,
+} from './types/measure';
 import {
   DEFAULT_COORD_DISPLAY,
   LNGLAT_DECIMALS_RANGE,
@@ -86,6 +94,26 @@ function loadCoordDisplay(): CoordDisplaySettings {
   }
 }
 
+// 量測樣式（只存在這台瀏覽器；不合法的欄位用預設值）
+const MEASURE_STYLE_STORE_KEY = 'utl.measureStyle';
+function loadMeasureStyle(): MeasureStyle {
+  const d = DEFAULT_MEASURE_STYLE;
+  const num = (v: unknown, min: number, max: number, def: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, min), max) : def;
+  try {
+    const v = JSON.parse(localStorage.getItem(MEASURE_STYLE_STORE_KEY) ?? '{}') as Partial<MeasureStyle>;
+    return {
+      color: isHexColor(v.color) ? v.color : d.color,
+      lineStyle: MEASURE_LINE_STYLES.some((s) => s.id === v.lineStyle) ? v.lineStyle! : d.lineStyle,
+      lineWidth: num(v.lineWidth, MEASURE_LINE_WIDTH_RANGE.min, MEASURE_LINE_WIDTH_RANGE.max, d.lineWidth),
+      fillOpacity: num(v.fillOpacity, 0, 1, d.fillOpacity),
+      showArrows: typeof v.showArrows === 'boolean' ? v.showArrows : d.showArrows,
+    };
+  } catch {
+    return d;
+  }
+}
+
 export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [initialLayout] = useState(loadLayout);
@@ -130,6 +158,15 @@ export default function App() {
       // 無法儲存時忽略
     }
   }, [coordDisplay]);
+  const [measureStyle, setMeasureStyle] = useState<MeasureStyle>(loadMeasureStyle);
+  const [styleSettingsOpen, setStyleSettingsOpen] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(MEASURE_STYLE_STORE_KEY, JSON.stringify(measureStyle));
+    } catch {
+      // 無法儲存時忽略
+    }
+  }, [measureStyle]);
   const pipe3dOptions = useMemo(() => ({ heightMode, section, exaggeration }), [heightMode, section, exaggeration]);
 
   // ---- 3D：第一次切到含 3D 的模式才建立 Cesium，之後保留
@@ -191,6 +228,7 @@ export default function App() {
         onOpenPipe3DSettings={() => setPipe3dSettingsOpen(true)}
         onOpenScaleSettings={() => setScaleSettingsOpen(true)}
         onOpenCoordSettings={() => setCoordSettingsOpen(true)}
+        onOpenStyleSettings={() => setStyleSettingsOpen(true)}
       />
       <MaterialFilterDrawer
         open={materialFilterOpen}
@@ -230,6 +268,12 @@ export default function App() {
         settings={coordDisplay}
         onChange={setCoordDisplay}
       />
+      <StyleSettingsDrawer
+        open={styleSettingsOpen}
+        onOpenChange={setStyleSettingsOpen}
+        measureStyle={measureStyle}
+        onMeasureStyleChange={setMeasureStyle}
+      />
       <div className="relative flex min-h-0 flex-1">
         <SplitView
           mode={mode}
@@ -246,6 +290,7 @@ export default function App() {
               enabledKinds={enabledKinds}
               colorMode={colorMode}
               scaleBar={scaleBar}
+              measureStyle={measureStyle}
               mapRef={mapRef}
               onZoomChange={setZoom}
               onTileError={setTileError}

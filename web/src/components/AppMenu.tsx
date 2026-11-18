@@ -1,4 +1,4 @@
-import { Box, Columns2, Crosshair, Map as MapIcon, Ruler } from 'lucide-react';
+import { Box, Columns2, Crosshair, Map as MapIcon, Palette, Ruler } from 'lucide-react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { VIEW_MODE_LABELS, type ViewMode } from '../types/view';
@@ -36,6 +36,7 @@ interface Props {
   onOpenPipe3DSettings: () => void;
   onOpenScaleSettings: () => void;
   onOpenCoordSettings: () => void;
+  onOpenStyleSettings: () => void;
 }
 
 /** 頂端選單列（Mega Menu：縮圖方格） */
@@ -44,6 +45,7 @@ export function AppMenu({
   onModeChange,
   onOpenScaleSettings,
   onOpenCoordSettings,
+  onOpenStyleSettings,
   enabledKinds,
   onKindsChange,
   colorMode,
@@ -93,6 +95,10 @@ export function AppMenu({
             <MenubarItem onSelect={onOpenCoordSettings}>
               <Crosshair />
               坐標系
+            </MenubarItem>
+            <MenubarItem onSelect={onOpenStyleSettings}>
+              <Palette />
+              樣式
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>

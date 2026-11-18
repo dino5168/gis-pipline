@@ -15,7 +15,7 @@ import {
   type LngLat,
   type MeasureResult,
 } from './measure';
-import { isTwoPointMode, type MeasureMode } from '../types/measure';
+import { DEFAULT_MEASURE_STYLE, MEASURE_DASHARRAY, isTwoPointMode, type MeasureMode, type MeasureStyle } from '../types/measure';
 
 const SOURCE_ID = 'measure';
 const LAYER_FILL = 'measure-fill';
@@ -24,7 +24,6 @@ const LAYER_LINE = 'measure-line';
 const LAYER_VERTEX = 'measure-vertex';
 const LAYER_ARROW = 'measure-arrow';
 const ARROW_IMAGE = 'measure-arrow';
-const LINE_COLOR = '#facc15';
 const HALO_COLOR = '#10212d';
 /** 新點與前一點在螢幕上距離小於此值（px）視為同一點（雙擊會先觸發兩次 click） */
 const SAME_POINT_PX = 4;
@@ -65,6 +64,7 @@ export class MeasureTool {
   private cursor: LngLat | null = null;
   private drawing = false;
   private labels: maplibregl.Marker[] = [];
+  private style: MeasureStyle = DEFAULT_MEASURE_STYLE;
   private readonly map: maplibregl.Map;
   private readonly opts: Options;
 
@@ -89,6 +89,12 @@ export class MeasureTool {
     if (mode && !wasActive) this.attach();
     else if (!mode && wasActive) this.detach();
     this.render();
+  }
+
+  /** 套用樣式（設定 → 樣式）；只改 paint／layout，不重建圖層 */
+  setStyle(style: MeasureStyle): void {
+    this.style = style;
+    if (this.map.getLayer(LAYER_LINE)) this.applyStyle();
   }
 
   destroy(): void {
@@ -315,7 +321,7 @@ export class MeasureTool {
       type: 'fill',
       source: SOURCE_ID,
       filter: ['==', ['geometry-type'], 'Polygon'],
-      paint: { 'fill-color': LINE_COLOR, 'fill-opacity': 0.18 },
+      paint: { 'fill-color': this.style.color, 'fill-opacity': this.style.fillOpacity },
     });
     this.map.addLayer({
       id: LAYER_CASING,
@@ -323,7 +329,7 @@ export class MeasureTool {
       source: SOURCE_ID,
       filter: ['!=', ['geometry-type'], 'Point'],
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': HALO_COLOR, 'line-width': 5, 'line-opacity': 0.6 },
+      paint: { 'line-color': HALO_COLOR, 'line-width': casingWidth(this.style.lineWidth), 'line-opacity': 0.6 },
     });
     this.map.addLayer({
       id: LAYER_LINE,
@@ -331,7 +337,7 @@ export class MeasureTool {
       source: SOURCE_ID,
       filter: ['!=', ['geometry-type'], 'Point'],
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': LINE_COLOR, 'line-width': 2.5, 'line-dasharray': [3, 2] },
+      paint: { 'line-color': this.style.color, 'line-width': this.style.lineWidth },
     });
     this.map.addLayer({
       id: LAYER_VERTEX,
@@ -341,11 +347,11 @@ export class MeasureTool {
       paint: {
         'circle-radius': 4,
         'circle-color': '#ffffff',
-        'circle-stroke-color': LINE_COLOR,
+        'circle-stroke-color': this.style.color,
         'circle-stroke-width': 2,
       },
     });
-    if (!this.map.hasImage(ARROW_IMAGE)) this.map.addImage(ARROW_IMAGE, arrowImage(), { pixelRatio: 2 });
+    if (!this.map.hasImage(ARROW_IMAGE)) this.map.addImage(ARROW_IMAGE, arrowImage(this.style.color), { pixelRatio: 2 });
     this.map.addLayer({
       id: LAYER_ARROW,
       type: 'symbol',
@@ -360,7 +366,23 @@ export class MeasureTool {
         'icon-ignore-placement': true,
       },
     });
+    this.applyStyle();
     this.render();
+  }
+
+  private applyStyle() {
+    const { color, lineStyle, lineWidth, fillOpacity, showArrows } = this.style;
+    const m = this.map;
+    m.setPaintProperty(LAYER_FILL, 'fill-color', color);
+    m.setPaintProperty(LAYER_FILL, 'fill-opacity', fillOpacity);
+    m.setPaintProperty(LAYER_CASING, 'line-width', casingWidth(lineWidth));
+    m.setPaintProperty(LAYER_LINE, 'line-color', color);
+    m.setPaintProperty(LAYER_LINE, 'line-width', lineWidth);
+    // undefined＝回到預設（實線）
+    m.setPaintProperty(LAYER_LINE, 'line-dasharray', MEASURE_DASHARRAY[lineStyle]);
+    m.setPaintProperty(LAYER_VERTEX, 'circle-stroke-color', color);
+    m.setLayoutProperty(LAYER_ARROW, 'visibility', showArrows ? 'visible' : 'none');
+    if (m.hasImage(ARROW_IMAGE)) m.updateImage(ARROW_IMAGE, arrowImage(color));
   }
 }
 
@@ -382,8 +404,13 @@ function screenBearing(a: LngLat, b: LngLat): number {
   return (Math.atan2(q.x - p.x, p.y - q.y) * 180) / Math.PI;
 }
 
-/** 箭頭圖示（朝上＝正北）：黃色帶倒鉤的箭頭，外加深色描邊；32px、pixelRatio 2 → 畫面 16px */
-function arrowImage(): ImageData {
+/** 外框（深色描邊）線寬：比量測線寬一點 */
+function casingWidth(lineWidth: number): number {
+  return lineWidth + 2.5;
+}
+
+/** 箭頭圖示（朝上＝正北）：量測顏色帶倒鉤的箭頭，外加深色描邊；32px、pixelRatio 2 → 畫面 16px */
+function arrowImage(color: string): ImageData {
   const size = 32;
   const canvas = document.createElement('canvas');
   canvas.width = size;
@@ -399,7 +426,7 @@ function arrowImage(): ImageData {
   ctx.lineWidth = 3;
   ctx.strokeStyle = HALO_COLOR;
   ctx.stroke();
-  ctx.fillStyle = LINE_COLOR;
+  ctx.fillStyle = color;
   ctx.fill();
   return ctx.getImageData(0, 0, size, size);
 }

@@ -29,7 +29,7 @@ import { MapZoomControls } from '../components/MapZoomControls';
 import { MeasureControl } from '../components/MeasureControl';
 import { MeasureTool } from './measureTool';
 import type { MeasureResult } from './measure';
-import type { MeasureMode } from '../types/measure';
+import type { MeasureMode, MeasureStyle } from '../types/measure';
 import { metersPerPixel } from './cameraScale';
 import { setPointerLngLat } from './pointerCoord';
 import type { ScaleBarSettings } from '../types/scaleBar';
@@ -57,6 +57,8 @@ interface Props {
   enabledKinds: ReadonlySet<PipeKindId>;
   colorMode: PipeColorMode;
   scaleBar: ScaleBarSettings;
+  /** 量測線條樣式（設定 → 樣式） */
+  measureStyle: MeasureStyle;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
@@ -132,6 +134,7 @@ export function MapView({
   enabledKinds,
   colorMode,
   scaleBar,
+  measureStyle,
   mapRef,
   onZoomChange,
   onTileError,
@@ -254,6 +257,11 @@ export function MapView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- 量測樣式
+  useEffect(() => {
+    measureRef.current?.setStyle(measureStyle);
+  }, [measureStyle]);
 
   // ---- 底圖切換
   useEffect(() => {
