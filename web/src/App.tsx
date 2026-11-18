@@ -343,6 +343,7 @@ export default function App() {
                 underground={underground}
                 showFps={showFps}
                 scaleBar={scaleBar}
+                measureStyle={measureStyle}
                 mapRef={mapRef}
                 onStatus={setPipe3dStatus}
                 onReady={setScene}

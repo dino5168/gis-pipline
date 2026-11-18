@@ -14,6 +14,10 @@ import { metersPerPixel } from '../cameraScale';
 import { setPointerLngLat } from '../pointerCoord';
 import type { ScaleBarSettings } from '../../types/scaleBar';
 import { PIPE_KIND_IDS, type PipeColorMode, type PipeKindId } from '../../types/pipeKind';
+import { Measure3DControl } from '../../components/Measure3DControl';
+import type { MeasureStyle } from '../../types/measure';
+import type { Measure3DMode, Measure3DResult } from '../../types/measure3d';
+import type { MeasureTool3D } from './measureTool3d';
 
 declare global {
   interface Window {
@@ -41,6 +45,8 @@ interface Props {
   /** 左上角顯示 FPS（效能量測用） */
   showFps: boolean;
   scaleBar: ScaleBarSettings;
+  /** 量測樣式（與 2D 共用） */
+  measureStyle: MeasureStyle;
   /** 2D 地圖：3D 管線以 2D 的畫面範圍與縮放等級載入 */
   mapRef: RefObject<maplibregl.Map | null>;
   onStatus: (s: Pipe3DStatus) => void;
@@ -108,6 +114,34 @@ export function CesiumView(p: Props) {
   // 各種類已載入的範圍（畫面還在範圍內就不重抓；關閉再打開時也沿用）
   const loadedArea = useRef(new Map<PipeKindId, LoadedArea>());
   const loadedResult = useRef(new Map<PipeKindId, { count: number; truncated: boolean }>());
+
+  // ---- 量測（與 2D 操作一致；3D 隱藏時關閉）
+  const measureRef = useRef<MeasureTool3D | null>(null);
+  const [measureOpen, setMeasureOpen] = useState(false);
+  const [measureMode, setMeasureMode] = useState<Measure3DMode | null>(null);
+  const [measureResult, setMeasureResult] = useState<Measure3DResult | null>(null);
+  const changeMeasureMode = useCallback((mode: Measure3DMode | null) => {
+    setMeasureMode(mode);
+    measureRef.current?.setMode(mode);
+  }, []);
+  const closeMeasure = useCallback(() => {
+    setMeasureOpen(false);
+    changeMeasureMode(null);
+  }, [changeMeasureMode]);
+  useEffect(() => {
+    if (!scene) return;
+    const tool = scene.createMeasureTool({ onChange: setMeasureResult, onExit: closeMeasure });
+    tool.setStyle(latest.current.measureStyle);
+    measureRef.current = tool;
+    return () => {
+      tool.destroy();
+      measureRef.current = null;
+    };
+  }, [scene, closeMeasure]);
+  useEffect(() => measureRef.current?.setStyle(p.measureStyle), [p.measureStyle]);
+  useEffect(() => {
+    if (!p.visible) closeMeasure();
+  }, [p.visible, closeMeasure]);
 
   // ---- 比例尺：畫面中心的地面解析度（鏡頭傾斜時只代表畫面中心附近）
   useEffect(() => {
@@ -223,6 +257,24 @@ export function CesiumView(p: Props) {
       <div ref={containerRef} className="h-full w-full" />
       <ScaleBar settings={p.scaleBar} metersPerPixel={mpp} />
       {scene && <Navigation3D scene={scene} />}
+      {scene && (
+        <div className="absolute top-1/2 left-3 z-40 flex -translate-y-1/2 flex-col items-start gap-2">
+          <Measure3DControl
+            open={measureOpen}
+            mode={measureMode}
+            result={measureResult}
+            onToggleOpen={() => {
+              if (measureOpen) closeMeasure();
+              else {
+                // 展開時預設距離量測
+                setMeasureOpen(true);
+                changeMeasureMode('distance');
+              }
+            }}
+            onModeChange={changeMeasureMode}
+          />
+        </div>
+      )}
     </div>
   );
 }

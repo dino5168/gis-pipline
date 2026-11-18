@@ -47,6 +47,9 @@ import type { CameraView } from '../../types/view';
 import type { Bbox } from './loadArea';
 import type { Pipe3D, Pipe3DOptions, SectionMode } from '../../types/pipe3d';
 import { PIPE_KINDS, type PipeColorMode, type PipeKindId } from '../../types/pipeKind';
+import type { HeightMode } from '../../types/pipe3d';
+import type { MeasurePoint3D } from '../../types/measure3d';
+import { MeasureTool3D, type MeasureTool3DOptions } from './measureTool3d';
 
 /** 管徑缺值時的預設（公尺） */
 const DEFAULT_DIA = 0.2;
@@ -72,6 +75,39 @@ export interface PipeSceneInit {
 export interface PipePickId {
   layer: PipeKindId;
   gid: number;
+}
+
+/** 管線中心線（場景坐標，已放大）與「點在管線表面」的容許距離，供量測取點 */
+interface PipeAxis {
+  pts: Cartesian3[];
+  tol: number;
+}
+
+const isPipePickId = (v: unknown): v is PipePickId =>
+  typeof v === 'object' && v !== null && 'gid' in v && 'layer' in v;
+
+/** 點到線段最近的點 */
+function closestOnSegment(p: Cartesian3, a: Cartesian3, b: Cartesian3, out: Cartesian3): Cartesian3 {
+  const ab = Cartesian3.subtract(b, a, new Cartesian3());
+  const len2 = Cartesian3.magnitudeSquared(ab);
+  const t = len2 > 0 ? Math.min(Math.max(Cartesian3.dot(Cartesian3.subtract(p, a, out), ab) / len2, 0), 1) : 0;
+  return Cartesian3.add(a, Cartesian3.multiplyByScalar(ab, t, out), out);
+}
+
+/** 射線與線段最接近時，線段上的點與兩者距離 */
+function closestOnSegmentToRay(ray: Ray, a: Cartesian3, b: Cartesian3): { point: Cartesian3; dist: number } {
+  const u = ray.direction;
+  const v = Cartesian3.subtract(b, a, new Cartesian3());
+  const w = Cartesian3.subtract(ray.origin, a, new Cartesian3());
+  const bb = Cartesian3.dot(u, v), c = Cartesian3.dot(v, v), d = Cartesian3.dot(u, w), e = Cartesian3.dot(v, w);
+  const denom = c - bb * bb; // |u| = 1
+  let t = denom > 1e-12 ? (e - bb * d) / denom : 0;
+  t = Math.min(Math.max(t, 0), 1);
+  const point = Cartesian3.add(a, Cartesian3.multiplyByScalar(v, t, new Cartesian3()), new Cartesian3());
+  const op = Cartesian3.subtract(point, ray.origin, new Cartesian3());
+  const along = Math.max(Cartesian3.dot(op, u), 0);
+  const foot = Cartesian3.add(ray.origin, Cartesian3.multiplyByScalar(u, along, new Cartesian3()), new Cartesian3());
+  return { point, dist: Cartesian3.distance(point, foot) };
 }
 
 const clampDepth = (d: number | null) => Math.min(Math.max(d ?? 0, 0), PIPE3D_MAX_DEPTH);
@@ -209,6 +245,8 @@ export class CesiumScene {
     // 固定光源（預設是依時間的太陽，夜間時管線會變暗）：從東南方高處照下
     const enu = Transforms.eastNorthUpToFixedFrame(Cartesian3.fromDegrees(TAIPEI_CENTER[0], TAIPEI_CENTER[1]));
     const lightFrom = Matrix4.multiplyByPointAsVector(enu, new Cartesian3(0.4, -0.6, 1), new Cartesian3());
+    // 預設的雙擊會讓鏡頭追蹤實體（量測圖形），會干擾量測的雙擊結束
+    this.viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
     scene.light = new DirectionalLight({ direction: Cartesian3.negate(Cartesian3.normalize(lightFrom, lightFrom), lightFrom) });
   }
 
@@ -292,6 +330,7 @@ export class CesiumScene {
 
   private applyExaggeration() {
     this.viewer.scene.verticalExaggeration = this.terrain === 'none' ? 1 : this.terrainExaggeration;
+    this.notifyHeightSettings(false);
     this.requestRender();
   }
 
@@ -541,6 +580,102 @@ export class CesiumScene {
     return [r.west, r.south, r.east, r.north].map((x) => CesiumMath.toDegrees(x)) as Bbox;
   }
 
+  // ---------------- 量測
+
+  /** 各管線種類目前畫出的管線中心線（gid → 中心線），量測取點用 */
+  private readonly pipeAxes = new Map<PipeKindId, Map<number, PipeAxis>>();
+  private readonly heightListeners = new Set<(heightModeChanged: boolean) => void>();
+
+  get heightMode(): HeightMode {
+    return this.options.heightMode;
+  }
+
+  /** 高度模式、管線放大倍率、地形或地形倍率改變時通知（量測要重畫或作廢）；回傳取消函式 */
+  onHeightSettingsChange(cb: (heightModeChanged: boolean) => void): () => void {
+    this.heightListeners.add(cb);
+    return () => this.heightListeners.delete(cb);
+  }
+
+  private notifyHeightSettings(heightModeChanged: boolean) {
+    for (const cb of this.heightListeners) cb(heightModeChanged);
+  }
+
+  createMeasureTool(opts: MeasureTool3DOptions): MeasureTool3D {
+    return new MeasureTool3D(this, opts);
+  }
+
+  /** 地形的畫面高度比例（畫面高度 ÷ 實際高度） */
+  private get terrainScale(): number {
+    return this.terrain === 'none' ? 1 : this.viewer.scene.verticalExaggeration || 1;
+  }
+
+  /**
+   * 量測取點：點到管線取管線表面上的點（取不到深度時改取中心線上最接近的點），否則取地面。
+   * 高度換算成實際尺寸：管線 ÷ 管線放大倍率；地面在埋深模式為 0、Z 模式為地形高度 ÷ 地形倍率。
+   */
+  pickMeasurePoint(pos: Cartesian2): MeasurePoint3D | null {
+    const { scene, camera } = this.viewer;
+    const ray = camera.getPickRay(pos);
+    if (!ray) return null;
+    for (const obj of scene.drillPick(pos, 5) as { id?: unknown }[]) {
+      if (!isPipePickId(obj.id)) continue;
+      const axis = this.pipeAxes.get(obj.id.layer)?.get(obj.id.gid);
+      if (!axis || axis.pts.length < 2) continue;
+      let hit: Cartesian3 | undefined;
+      // 表面上的點：深度緩衝取得的位置要真的在這條管線附近（可能是地面或量測圖形的深度）
+      const surface = scene.pickPositionSupported ? scene.pickPosition(pos) : undefined;
+      if (surface) {
+        const tmp = new Cartesian3();
+        for (let j = 0; j < axis.pts.length - 1 && !hit; j++) {
+          closestOnSegment(surface, axis.pts[j], axis.pts[j + 1], tmp);
+          if (Cartesian3.distance(tmp, surface) <= axis.tol) hit = surface;
+        }
+      }
+      if (!hit) {
+        let best = Infinity;
+        for (let j = 0; j < axis.pts.length - 1; j++) {
+          const c = closestOnSegmentToRay(ray, axis.pts[j], axis.pts[j + 1]);
+          if (c.dist < best) {
+            best = c.dist;
+            hit = c.point;
+          }
+        }
+      }
+      if (!hit) continue;
+      const c = Cartographic.fromCartesian(hit);
+      return {
+        lng: CesiumMath.toDegrees(c.longitude),
+        lat: CesiumMath.toDegrees(c.latitude),
+        h: c.height / this.options.exaggeration,
+        on: 'pipe',
+        pipe: { layer: obj.id.layer, gid: obj.id.gid },
+      };
+    }
+    return this.groundPointAt(pos);
+  }
+
+  /** 滑鼠位置的地面點（地形表面；沒有地形或取不到時取橢球面，鏡頭在地面下也取得到） */
+  groundPointAt(pos: Cartesian2): MeasurePoint3D | null {
+    const { scene, camera } = this.viewer;
+    const ray = camera.getPickRay(pos);
+    if (!ray) return null;
+    let p: Cartesian3 | undefined = this.terrain === 'none' ? undefined : scene.globe.pick(ray, scene);
+    if (!p) {
+      const hit = IntersectionTests.rayEllipsoid(ray, scene.globe.ellipsoid);
+      if (!hit) return null;
+      p = Ray.getPoint(ray, hit.start > 0 ? hit.start : hit.stop);
+    }
+    const c = Cartographic.fromCartesian(p);
+    const h = this.options.heightMode === 'z' && this.terrain !== 'none' ? c.height / this.terrainScale : 0;
+    return { lng: CesiumMath.toDegrees(c.longitude), lat: CesiumMath.toDegrees(c.latitude), h, on: 'ground' };
+  }
+
+  /** 量測點在畫面上的位置（實際高度乘回目前的放大倍率） */
+  measureScenePosition(p: MeasurePoint3D): Cartesian3 {
+    const scale = p.on === 'pipe' ? this.options.exaggeration : this.terrainScale;
+    return Cartesian3.fromDegrees(p.lng, p.lat, p.h * scale);
+  }
+
   // ---------------- 3D 管線
 
   setPipes(kind: PipeKindId, pipes: Pipe3D[]) {
@@ -560,8 +695,12 @@ export class CesiumScene {
   }
 
   setPipeOptions(options: Pipe3DOptions) {
+    const prev = this.options;
     this.options = options;
     this.markAllDirty();
+    if (prev.heightMode !== options.heightMode || prev.exaggeration !== options.exaggeration) {
+      this.notifyHeightSettings(prev.heightMode !== options.heightMode);
+    }
   }
 
   setMaterials(materials: ReadonlySet<string>) {
@@ -674,6 +813,8 @@ export class CesiumScene {
   private buildInstances(kind: PipeKindId, pipes: Pipe3D[]): GeometryInstance[] {
     const { heightMode, section: sectionMode, exaggeration: k } = this.options;
     const instances: GeometryInstance[] = [];
+    const axes = new Map<number, PipeAxis>();
+    this.pipeAxes.set(kind, axes);
 
     for (const p of pipes) {
       const n = p.coords.length;
@@ -697,6 +838,7 @@ export class CesiumScene {
         return heightMode === 'depth-top' ? -(d + half) : -d;
       };
       const pos = p.coords.map(([lng, lat], j) => Cartesian3.fromDegrees(lng, lat, centerZ(j) * k));
+      axes.set(p.gid, { pts: pos, tol: (Math.hypot(sec.w, sec.h) / 2) * k * 1.2 + 0.05 });
 
       for (let j = 0; j < n - 1; j++) {
         const dir = Cartesian3.subtract(pos[j + 1], pos[j], new Cartesian3());
