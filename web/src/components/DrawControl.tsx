@@ -61,12 +61,13 @@ const GROUP_CLASS = 'bg-card/75 flex overflow-hidden rounded-md shadow-sm backdr
 
 /** 各模式開始前的提示 */
 const START_HINT: Partial<Record<DrawMode, string>> = {
-  point: '單擊放置點',
-  linestring: '單擊開始畫線',
-  polygon: '單擊開始畫多邊形',
+  point: '單擊放置點（靠近其他圖形的頂點／邊會吸附，黃點）',
+  linestring: '單擊開始畫線（靠近其他圖形的頂點／邊會吸附，黃點）',
+  polygon: '單擊開始畫多邊形（靠近其他圖形的頂點／邊會吸附，黃點）',
   rectangle: '單擊決定第一個角',
-  circle: '單擊決定圓心',
-  select: '單擊圖形選取；拖頂點移動，點邊中點加頂點，右鍵刪頂點；矩形拖角、圓拖邊調整大小；Delete 刪除',
+  circle: '單擊決定圓心（可吸附到其他圖形的頂點／邊）',
+  select:
+    '單擊圖形選取；拖頂點移動（可吸附），點邊中點加頂點，右鍵刪頂點；矩形拖角、圓拖邊調整大小；Delete 刪除',
   drag: '單擊圖形選取，再拖曳移動整個圖形',
   rotate: '按住圖形拖曳，繞中心旋轉',
   delete: '單擊圖形刪除（Ctrl+Z 復原）',

@@ -2,6 +2,8 @@
 // Terra Draw 建立後一直保持啟動（stop() 會清空圖形）；繪圖面板關閉時切回內建的 static 模式，圖形仍留在圖上、不可互動。
 // 編輯：選取（拖頂點／加刪頂點）、拖曳用 Terra Draw 的 select 模式（同一個類別開兩個實例，flags 不同）；
 // 旋轉、刪除與復原自己寫（Terra Draw 的旋轉只能按住鍵盤、且不進復原紀錄）。
+// 吸附：用 Terra Draw 的 snapping.toFeature，只吸附自己畫的圖形（頂點優先、其次是邊），不吸附管線。
+import type { Feature } from 'geojson';
 import type * as maplibregl from 'maplibre-gl';
 import {
   TerraDraw,
@@ -90,6 +92,39 @@ const SELECT_KEY_EVENTS = { deselect: null, delete: 'Delete', rotate: null, scal
 
 const SHAPE_MODES = Object.keys(DRAW_SHAPE_MODE_NAMES) as DrawShapeMode[];
 
+/**
+ * 選取類模式的游標：空白處維持 MapLibre 的手形（平移地圖）、圖形上 pointer（可點選）、
+ * 頂點／縮放控制點 move（可拖）、拖曳中 grabbing、邊中點 crosshair（加頂點）。
+ */
+const SELECT_CURSORS = {
+  pointerOverFeature: 'pointer',
+  pointerOverCoordinate: 'move',
+  pointerOverResizeHandle: 'move',
+  dragStart: 'grabbing',
+  dragEnd: 'pointer',
+  insertMidpoint: 'crosshair',
+} as const;
+
+/** 吸附距離（螢幕像素；Terra Draw 預設 40px 太黏，繪圖模式改 20px） */
+const SNAP_PX = 20;
+/** 吸附點樣式：黃色，與繪圖色區分 */
+const SNAP_POINT = {
+  snappingPointColor: '#facc15',
+  snappingPointWidth: 5,
+  snappingPointOutlineColor: '#ffffff',
+  snappingPointOutlineWidth: 2,
+} as const;
+
+/** 可吸附的對象：使用者畫好的圖形（排除輔助點、繪製中的圖形；正在畫／編輯的圖形本身由 Terra Draw 排除） */
+function snapTarget(f: Feature): boolean {
+  const p = f.properties;
+  if (!p || !SHAPE_MODES.includes(p.mode)) return false;
+  return !(p.currentlyDrawing || p.coordinatePoint || p.closingPoint || p.snappingPoint || p.selectionPoint || p.midPoint);
+}
+
+/** 吸附到其他圖形的頂點與邊（頂點優先） */
+const SNAP_TO_FEATURE = { toFeature: { filter: snapTarget, toCoordinate: true, toLine: true }, showSnappingPoint: true };
+
 /** 每種圖形套用同一組 select flags */
 function flagsForAll(feature: object) {
   return Object.fromEntries(SHAPE_MODES.map((m) => [m, { feature }]));
@@ -99,33 +134,50 @@ function flagsForAll(feature: object) {
 const EDIT_FLAGS = {
   ...flagsForAll({}),
   point: { feature: { draggable: true } },
-  linestring: { feature: { coordinates: { draggable: true, midpoints: true, deletable: true } } },
-  polygon: { feature: { coordinates: { draggable: true, midpoints: true, deletable: true } } },
+  linestring: { feature: { coordinates: { draggable: true, midpoints: true, deletable: true, snappable: SNAP_TO_FEATURE } } },
+  polygon: { feature: { coordinates: { draggable: true, midpoints: true, deletable: true, snappable: SNAP_TO_FEATURE } } },
   rectangle: { feature: { coordinates: { resizable: 'opposite' } } },
   circle: { feature: { coordinates: { resizable: 'center' } } },
 };
 
 function createModes() {
   const select = (modeName: string, flags: Record<string, object>) =>
-    new TerraDrawSelectMode({ modeName, flags, keyEvents: SELECT_KEY_EVENTS, styles: SELECTED });
+    new TerraDrawSelectMode({
+      modeName,
+      flags,
+      keyEvents: SELECT_KEY_EVENTS,
+      cursors: SELECT_CURSORS,
+      styles: { ...SELECTED, ...SNAP_POINT },
+    });
   return [
     new TerraDrawPointMode({
-      styles: { pointColor: DRAW_COLOR, pointWidth: 6, pointOutlineColor: '#ffffff', pointOutlineWidth: 2 },
+      pointerDistance: SNAP_PX,
+      snapping: SNAP_TO_FEATURE,
+      styles: { pointColor: DRAW_COLOR, pointWidth: 6, pointOutlineColor: '#ffffff', pointOutlineWidth: 2, ...SNAP_POINT },
     }),
     new TerraDrawLineStringMode({
       keyEvents: KEY_EVENTS,
       showCoordinatePoints: true,
-      styles: { lineStringColor: DRAW_COLOR, lineStringWidth: LINE_WIDTH, ...CLOSING_POINT, ...VERTEX },
+      pointerDistance: SNAP_PX,
+      snapping: SNAP_TO_FEATURE,
+      styles: { lineStringColor: DRAW_COLOR, lineStringWidth: LINE_WIDTH, ...CLOSING_POINT, ...VERTEX, ...SNAP_POINT },
     }),
     new TerraDrawPolygonMode({
       keyEvents: KEY_EVENTS,
       showCoordinatePoints: true,
-      styles: { ...POLYGON, ...CLOSING_POINT, ...VERTEX },
+      pointerDistance: SNAP_PX,
+      snapping: SNAP_TO_FEATURE,
+      styles: { ...POLYGON, ...CLOSING_POINT, ...VERTEX, ...SNAP_POINT },
     }),
-    // 矩形：兩次單擊決定對角，邊沿經緯線（與正北平行）
+    // 矩形：兩次單擊決定對角，邊沿經緯線（與正北平行）；Terra Draw 矩形不支援吸附
     new TerraDrawRectangleMode({ keyEvents: { cancel: null, finish: null }, styles: POLYGON }),
-    // 圓：單擊圓心、再單擊決定半徑
-    new TerraDrawCircleMode({ keyEvents: { cancel: null, finish: null }, styles: POLYGON }),
+    // 圓：單擊圓心、再單擊決定半徑；只有圓心可吸附
+    new TerraDrawCircleMode({
+      keyEvents: { cancel: null, finish: null },
+      pointerDistance: SNAP_PX,
+      snapping: SNAP_TO_FEATURE,
+      styles: { ...POLYGON, ...SNAP_POINT },
+    }),
     select('select', EDIT_FLAGS),
     select('drag', flagsForAll({ draggable: true })),
     // 旋轉：只負責選取與醒目顯示，拖曳旋轉由 DrawTool 處理
