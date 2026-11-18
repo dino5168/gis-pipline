@@ -3,8 +3,10 @@
 // 編輯：選取（拖頂點／加刪頂點）、拖曳用 Terra Draw 的 select 模式（同一個類別開兩個實例，flags 不同）；
 // 旋轉、刪除與復原自己寫（Terra Draw 的旋轉只能按住鍵盤、且不進復原紀錄）。
 // 吸附：用 Terra Draw 的 snapping.toFeature，只吸附自己畫的圖形（頂點優先、其次是邊），不吸附管線。
+// 文字標註：Terra Draw 點模式另開一個實例（modeName 'text'），文字存在 properties.text，
+// 用 MapLibre Marker 顯示（地圖樣式沒有 glyphs，不能用 symbol 文字）；選取／拖曳／刪除／復原沿用點的做法。
 import type { Feature } from 'geojson';
-import type * as maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
 import {
   TerraDraw,
   TerraDrawCircleMode,
@@ -118,12 +120,28 @@ const SNAP_POINT = {
 /** 可吸附的對象：使用者畫好的圖形（排除輔助點、繪製中的圖形；正在畫／編輯的圖形本身由 Terra Draw 排除） */
 function snapTarget(f: Feature): boolean {
   const p = f.properties;
-  if (!p || !SHAPE_MODES.includes(p.mode)) return false;
+  if (!p || !SHAPE_MODES.includes(p.mode) || p.mode === TEXT_MODE) return false;
   return !(p.currentlyDrawing || p.coordinatePoint || p.closingPoint || p.snappingPoint || p.selectionPoint || p.midPoint);
 }
 
 /** 吸附到其他圖形的頂點與邊（頂點優先） */
 const SNAP_TO_FEATURE = { toFeature: { filter: snapTarget, toCoordinate: true, toLine: true }, showSnappingPoint: true };
+
+/** 文字標註 */
+const TEXT_MODE = 'text';
+const TEXT_MAX_LENGTH = 100;
+/** 文字顏色同繪圖色，深色描邊讓文字在各種底圖上都看得清楚 */
+const TEXT_SHADOW = '0 0 2px #000, 0 0 3px #000, 0 0 4px #000';
+/** 文字標籤可以點的模式：選取／拖曳＝選取、刪除＝刪除、文字＝修改文字（其他模式不擋地圖操作） */
+const TEXT_CLICK_MODES: ReadonlySet<DrawMode> = new Set<DrawMode>(['select', 'drag', 'delete', 'text']);
+
+/** 編輯中的文字標註 */
+interface TextEdit {
+  id: FeatureId;
+  /** 剛放下的新標註（取消或空白就刪除） */
+  isNew: boolean;
+  marker: maplibregl.Marker;
+}
 
 /** 每種圖形套用同一組 select flags */
 function flagsForAll(feature: object) {
@@ -134,6 +152,7 @@ function flagsForAll(feature: object) {
 const EDIT_FLAGS = {
   ...flagsForAll({}),
   point: { feature: { draggable: true } },
+  text: { feature: { draggable: true } },
   linestring: { feature: { coordinates: { draggable: true, midpoints: true, deletable: true, snappable: SNAP_TO_FEATURE } } },
   polygon: { feature: { coordinates: { draggable: true, midpoints: true, deletable: true, snappable: SNAP_TO_FEATURE } } },
   rectangle: { feature: { coordinates: { resizable: 'opposite' } } },
@@ -177,6 +196,11 @@ function createModes() {
       pointerDistance: SNAP_PX,
       snapping: SNAP_TO_FEATURE,
       styles: { ...POLYGON, ...SNAP_POINT },
+    }),
+    // 文字標註：單擊放置位置（小點），再輸入文字；不吸附
+    new TerraDrawPointMode({
+      modeName: TEXT_MODE,
+      styles: { pointColor: DRAW_COLOR, pointWidth: 3, pointOutlineColor: '#ffffff', pointOutlineWidth: 1 },
     }),
     select('select', EDIT_FLAGS),
     select('drag', flagsForAll({ draggable: true })),
@@ -293,6 +317,9 @@ export class DrawTool {
   /** 滑鼠按住中（拖曳頂點／圖形時不記錄中間狀態） */
   private pointerDown = false;
   private rotating: RotateState | null = null;
+  /** 文字標註的 Marker（feature id → Marker） */
+  private textLabels = new Map<FeatureId, maplibregl.Marker>();
+  private textEdit: TextEdit | null = null;
   private readonly map: maplibregl.Map;
   private readonly opts: Options;
 
@@ -311,6 +338,7 @@ export class DrawTool {
   /** 開啟／關閉繪圖；關閉時圖形保留（繪製到一半的會取消） */
   setOpen(open: boolean): void {
     if (open === this.open) return;
+    this.endTextEdit(true);
     this.open = open;
     if (open) this.attach();
     else {
@@ -324,6 +352,7 @@ export class DrawTool {
 
   /** 切換模式（null＝不在任何模式，只顯示圖形）；繪製到一半的圖形會取消、選取會取消 */
   setMode(mode: DrawMode | null): void {
+    this.endTextEdit(true);
     this.mode = mode;
     this.currentId = null;
     this.applyMode();
@@ -332,6 +361,10 @@ export class DrawTool {
 
   /** 復原上一個動作（繪製中則取消這個圖形） */
   undo(): void {
+    if (this.textEdit) {
+      this.endTextEdit(false);
+      return;
+    }
     if (this.isDrawing()) {
       this.cancelDrawing();
       return;
@@ -344,12 +377,16 @@ export class DrawTool {
   redo(): void {
     const next = this.redoStack.pop();
     if (next === undefined) return;
+    this.endTextEdit(false);
     if (this.isDrawing()) this.cancelDrawing();
     this.history.push(next);
     this.restore(next);
   }
 
   destroy(): void {
+    this.endTextEdit(false);
+    for (const m of this.textLabels.values()) m.remove();
+    this.textLabels.clear();
     if (this.open) this.detach();
     if (this.draw?.enabled) this.draw.stop();
     this.draw = null;
@@ -360,20 +397,24 @@ export class DrawTool {
     this.draw = new TerraDraw({ adapter, modes: createModes() });
     this.draw.start();
     this.draw.on('change', (ids, type) => this.handleChange(ids, type));
-    this.draw.on('finish', (id) => {
+    this.draw.on('finish', (id, ctx) => {
       this.currentId = id;
       this.countFeatures();
-      this.checkpoint();
+      // 新的文字標註：先輸入文字，確定後才記入復原
+      if (ctx.mode === TEXT_MODE && ctx.action === 'draw') this.startTextEdit(id, true);
+      else this.checkpoint();
       this.emit();
     });
     this.draw.on('select', (id) => {
       this.selectedId = id;
       this.currentId = id;
+      this.syncTextLabels();
       this.emit();
     });
     this.draw.on('deselect', (id) => {
       if (this.selectedId === id) this.selectedId = null;
       if (this.currentId === id) this.currentId = null;
+      this.syncTextLabels();
       this.emit();
     });
     this.history = [this.serialize()];
@@ -391,6 +432,7 @@ export class DrawTool {
     if (d.getMode() !== target) d.setMode(target);
     this.selectedId = null;
     this.updateCursor();
+    this.syncTextLabels();
   }
 
   private updateCursor() {
@@ -436,6 +478,7 @@ export class DrawTool {
     if (!this.restoring && !this.pointerDown && !this.rotating && !this.isDrawing()) {
       queueMicrotask(() => this.checkpoint());
     }
+    this.syncTextLabels();
     this.emit();
   }
 
@@ -452,7 +495,7 @@ export class DrawTool {
 
   /** 狀態與上一個快照不同時記一筆 */
   private checkpoint() {
-    if (!this.draw?.enabled || this.restoring || this.isDrawing()) return;
+    if (!this.draw?.enabled || this.restoring || this.textEdit || this.isDrawing()) return;
     const s = this.serialize();
     if (s === this.history[this.history.length - 1]) return;
     this.history.push(s);
@@ -479,6 +522,132 @@ export class DrawTool {
     }
     this.currentId = null;
     this.countFeatures();
+    this.syncTextLabels();
+    this.emit();
+  }
+
+  // ---- 文字標註
+  /** 依 Terra Draw 的文字點建立／更新／移除 Marker */
+  private syncTextLabels() {
+    const d = this.draw;
+    if (!d?.enabled) return;
+    const clickable = this.open && this.mode !== null && TEXT_CLICK_MODES.has(this.mode);
+    const seen = new Set<FeatureId>();
+    for (const f of d.getSnapshot()) {
+      if (f.properties.mode !== TEXT_MODE || f.geometry.type !== 'Point' || !isUserFeature(f)) continue;
+      const id = f.id as FeatureId;
+      // 編輯中的標註由輸入框取代
+      if (this.textEdit?.id === id) continue;
+      seen.add(id);
+      const at = f.geometry.coordinates as LngLat;
+      let marker = this.textLabels.get(id);
+      if (!marker) {
+        marker = new maplibregl.Marker({ element: this.createTextLabel(id), anchor: 'bottom', offset: [0, -4] })
+          .setLngLat(at)
+          .addTo(this.map);
+        this.textLabels.set(id, marker);
+      } else marker.setLngLat(at);
+      const el = marker.getElement();
+      const text = typeof f.properties.text === 'string' ? f.properties.text : '';
+      if (el.textContent !== text) el.textContent = text;
+      el.classList.toggle('pointer-events-none', !clickable);
+      el.classList.toggle('cursor-pointer', clickable);
+      el.classList.toggle('ring-1', this.selectedId === id);
+      el.title = clickable ? this.textLabelTitle() : '';
+    }
+    for (const [id, m] of this.textLabels) {
+      if (seen.has(id)) continue;
+      m.remove();
+      this.textLabels.delete(id);
+    }
+  }
+
+  private textLabelTitle(): string {
+    if (this.mode === 'delete') return '單擊刪除';
+    if (this.mode === 'text') return '單擊修改文字';
+    return '單擊選取；雙擊修改文字';
+  }
+
+  private createTextLabel(id: FeatureId): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'rounded px-1 text-sm leading-tight font-semibold whitespace-pre select-none ring-white/80';
+    el.style.color = DRAW_COLOR;
+    el.style.textShadow = TEXT_SHADOW;
+    // 標籤不在 canvas 上，Terra Draw 收不到，點選自己處理；不讓事件帶動地圖（拖曳、雙擊放大）
+    for (const type of ['mousedown', 'pointerdown', 'dblclick'] as const)
+      el.addEventListener(type, (e) => e.stopPropagation());
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.handleTextLabelClick(id);
+    });
+    el.addEventListener('dblclick', () => {
+      if (this.mode === 'select' || this.mode === 'drag') this.startTextEdit(id, false);
+    });
+    return el;
+  }
+
+  private handleTextLabelClick(id: FeatureId) {
+    const d = this.draw;
+    if (!d?.enabled || !d.hasFeature(id) || !this.mode) return;
+    if (this.mode === 'delete') {
+      d.removeFeatures([id]);
+      this.countFeatures();
+      this.checkpoint();
+      this.emit();
+    } else if (this.mode === 'text') this.startTextEdit(id, false);
+    else if ((this.mode === 'select' || this.mode === 'drag') && this.selectedId !== id) d.selectFeature(id, this.mode);
+  }
+
+  /** 在標註位置顯示輸入框；Enter 或點到別處確定、Esc 取消 */
+  private startTextEdit(id: FeatureId, isNew: boolean) {
+    const d = this.draw;
+    if (!d?.enabled) return;
+    this.endTextEdit(true);
+    const f = d.getSnapshotFeature(id);
+    if (!f || f.geometry.type !== 'Point') return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = TEXT_MAX_LENGTH;
+    input.placeholder = '輸入文字，Enter 確定';
+    input.value = typeof f.properties.text === 'string' ? f.properties.text : '';
+    input.className =
+      'bg-card/95 text-foreground placeholder:text-muted-foreground ring-primary w-48 rounded px-1.5 py-0.5 text-sm shadow-sm ring-1 outline-none';
+    for (const type of ['mousedown', 'pointerdown', 'pointerup', 'click', 'dblclick', 'wheel'] as const)
+      input.addEventListener(type, (e) => e.stopPropagation());
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') this.endTextEdit(true);
+      else if (e.key === 'Escape') this.endTextEdit(false);
+    });
+    input.addEventListener('blur', () => this.endTextEdit(true));
+    const marker = new maplibregl.Marker({ element: input, anchor: 'bottom', offset: [0, -4] })
+      .setLngLat(f.geometry.coordinates as LngLat)
+      .addTo(this.map);
+    this.textEdit = { id, isNew, marker };
+    this.textLabels.get(id)?.remove();
+    this.textLabels.delete(id);
+    this.emit();
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
+  }
+
+  /** 結束文字編輯：commit＝套用輸入的文字（空白則刪除標註）；否則取消（新標註刪除、舊標註維持原文字） */
+  private endTextEdit(commit: boolean) {
+    const edit = this.textEdit;
+    if (!edit) return;
+    this.textEdit = null;
+    const text = (edit.marker.getElement() as HTMLInputElement).value.trim();
+    edit.marker.remove();
+    const d = this.draw;
+    if (d?.enabled && d.hasFeature(edit.id)) {
+      if (commit && text) d.updateFeatureProperties(edit.id, { text });
+      else if (commit || edit.isNew) d.removeFeatures([edit.id]);
+    }
+    this.countFeatures();
+    this.syncTextLabels();
+    this.checkpoint();
     this.emit();
   }
 
@@ -493,7 +662,7 @@ export class DrawTool {
       featureCount: this.featureCount,
       measure: f ? measureFeature(f) : null,
       selected: this.selectedId !== null,
-      canUndo: this.history.length > 1 || this.isDrawing(),
+      canUndo: this.history.length > 1 || this.isDrawing() || this.textEdit !== null,
       canRedo: this.redoStack.length > 0,
     });
   }

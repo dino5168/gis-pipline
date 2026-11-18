@@ -30,6 +30,7 @@ export const DRAW_IMPLEMENTED_MODES: ReadonlySet<DrawMode> = new Set<DrawMode>([
   'polygon',
   'rectangle',
   'circle',
+  'text',
   'select',
   'drag',
   'rotate',
