@@ -37,6 +37,7 @@ interface Props {
   status: DrawStatus | null;
   onToggleOpen: () => void;
   onModeChange: (mode: DrawMode) => void;
+  onUndo: () => void;
 }
 
 const MODE_ICONS: Record<DrawMode, LucideIcon> = {
@@ -65,6 +66,10 @@ const START_HINT: Partial<Record<DrawMode, string>> = {
   polygon: '單擊開始畫多邊形',
   rectangle: '單擊決定第一個角',
   circle: '單擊決定圓心',
+  select: '單擊圖形選取；拖頂點移動，點邊中點加頂點，右鍵刪頂點；矩形拖角、圓拖邊調整大小；Delete 刪除',
+  drag: '單擊圖形選取，再拖曳移動整個圖形',
+  rotate: '按住圖形拖曳，繞中心旋轉',
+  delete: '單擊圖形刪除（Ctrl+Z 復原）',
 };
 
 /** 繪製中的提示 */
@@ -79,7 +84,8 @@ function hint(mode: DrawMode | null, m: DrawMeasure | null): string {
   if (!mode) return '選擇上方的圖形或編輯工具；Esc 關閉';
   if (!DRAW_IMPLEMENTED_MODES.has(mode)) return `「${DRAW_MODE_NAMES[mode]}」尚未實作`;
   if (m?.drawing) return `${DRAWING_HINT[mode] ?? ''}；Esc 取消這個圖形`;
-  return `${DRAW_MODE_NAMES[mode]}：${START_HINT[mode] ?? ''}；Esc 關閉`;
+  const esc = mode === 'select' ? 'Esc 關閉' : 'Esc 回到選取';
+  return `${DRAW_MODE_NAMES[mode]}：${START_HINT[mode] ?? ''}；${esc}`;
 }
 
 /** 量測值的各列（標題、數值） */
@@ -94,7 +100,7 @@ function measureRows(m: DrawMeasure): [string, string][] {
   return rows;
 }
 
-export function DrawControl({ open, mode, status, onToggleOpen, onModeChange }: Props) {
+export function DrawControl({ open, mode, status, onToggleOpen, onModeChange, onUndo }: Props) {
   const modeButton = (m: DrawMode) => {
     const Icon = MODE_ICONS[m];
     const active = mode === m;
@@ -138,7 +144,15 @@ export function DrawControl({ open, mode, status, onToggleOpen, onModeChange }: 
           </div>
           <div className={GROUP_CLASS} role="group" aria-label="編輯">
             {EDIT_MODES.map(modeButton)}
-            <Button variant="ghost" size="icon-lg" className="rounded-none" title="復原（尚未實作）" aria-label="復原" disabled>
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              className="rounded-none"
+              title="復原（Ctrl+Z；重做 Ctrl+Y）"
+              aria-label="復原"
+              disabled={!status?.canUndo}
+              onClick={onUndo}
+            >
               <Undo2 />
             </Button>
           </div>

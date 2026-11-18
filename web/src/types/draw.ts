@@ -30,6 +30,10 @@ export const DRAW_IMPLEMENTED_MODES: ReadonlySet<DrawMode> = new Set<DrawMode>([
   'polygon',
   'rectangle',
   'circle',
+  'select',
+  'drag',
+  'rotate',
+  'delete',
 ]);
 
 /** 繪圖顏色（第 7 步再做成可設定） */
@@ -58,6 +62,10 @@ export interface DrawMeasure {
 export interface DrawStatus {
   /** 圖上圖形數（不含繪製中的） */
   featureCount: number;
-  /** 繪製中的圖形，或最後畫完的圖形的量測值 */
+  /** 繪製中、選取中，或最後畫完的圖形的量測值 */
   measure: DrawMeasure | null;
+  /** 有選取中的圖形 */
+  selected: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
 }

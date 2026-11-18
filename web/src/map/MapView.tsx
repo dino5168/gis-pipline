@@ -167,6 +167,8 @@ export function MapView({
   };
   const closeDrawRef = useRef(closeDraw);
   closeDrawRef.current = closeDraw;
+  const changeDrawModeRef = useRef(changeDrawMode);
+  changeDrawModeRef.current = changeDrawMode;
   const changeMeasureMode = (mode: MeasureMode | null) => {
     setMeasureMode(mode);
     measureRef.current?.setMode(mode);
@@ -229,6 +231,7 @@ export function MapView({
     measureRef.current = measure;
     const draw = new DrawTool(map, {
       onChange: setDrawStatus,
+      onModeRequest: (mode) => changeDrawModeRef.current(mode),
       onExit: () => closeDrawRef.current(),
     });
     drawRef.current = draw;
@@ -428,6 +431,7 @@ export function MapView({
             }
           }}
           onModeChange={changeDrawMode}
+          onUndo={() => drawRef.current?.undo()}
         />
       </div>
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
