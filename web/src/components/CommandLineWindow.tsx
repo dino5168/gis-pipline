@@ -164,6 +164,7 @@ export function CommandLineWindow({ state, onSubmit, onCancel, onClose }: Props)
               {']'}
             </>
           )}
+          {prompt.def !== undefined && ` <${prompt.def}>`}
           :
         </span>
         <input

@@ -9,7 +9,8 @@
 // 有洞的結果是自訂模式 'holed'（不能編輯頂點，拖曳由這裡自己處理）。
 // 儲存：每次記入復原紀錄時存到 localStorage（utl.drawings），下次開啟自動載入；匯出／匯入 GeoJSON 見 drawIO.ts。
 // 樣式：Terra Draw 的樣式用函式讀取 this.style，改樣式後觸發一次重繪即套用到所有圖形。
-import type { Feature, FeatureCollection } from 'geojson';
+import type { Feature, FeatureCollection, LineString, Point, Polygon, Position } from 'geojson';
+import type { CommandShapeMode } from '../types/commandLine';
 import * as maplibregl from 'maplibre-gl';
 import {
   TerraDraw,
@@ -539,18 +540,20 @@ export class DrawTool {
     this.emit();
   }
 
-  /** 加入一條線（命令列 LINE 用；坐標為經緯度），記入復原；無效時回傳 null */
-  addLineString(coords: LngLat[]): FeatureId | null {
+  /** 加入一個圖形（命令列用；坐標為經緯度），記入復原；無效時回傳 null */
+  addShape(mode: CommandShapeMode, geometry: Point | LineString | Polygon): FeatureId | null {
     const d = this.draw;
-    if (!d?.enabled || coords.length < 2) return null;
+    if (!d?.enabled) return null;
     this.endTextEdit(true);
     const id = crypto.randomUUID();
-    const feature: GeoJSONStoreFeatures = {
-      type: 'Feature',
-      id,
-      geometry: { type: 'LineString', coordinates: coords.map(([x, y]) => [round(x), round(y)]) },
-      properties: { mode: 'linestring' },
-    };
+    const rp = (p: Position) => [round(p[0]), round(p[1])];
+    const g: Point | LineString | Polygon =
+      geometry.type === 'Point'
+        ? { type: 'Point', coordinates: rp(geometry.coordinates) }
+        : geometry.type === 'LineString'
+          ? { type: 'LineString', coordinates: geometry.coordinates.map(rp) }
+          : { type: 'Polygon', coordinates: geometry.coordinates.map((r) => r.map(rp)) };
+    const feature: GeoJSONStoreFeatures = { type: 'Feature', id, geometry: g, properties: { mode } };
     let ok = false;
     this.restoring = true;
     try {
