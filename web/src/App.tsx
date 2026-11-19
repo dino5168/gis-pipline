@@ -133,6 +133,17 @@ function loadDrawStyle(): DrawStyle {
   }
 }
 
+// 視窗開關（只存在這台瀏覽器）
+const WINDOWS_STORE_KEY = 'utl.windows';
+function loadCommandLine2d(): boolean {
+  try {
+    const v = JSON.parse(localStorage.getItem(WINDOWS_STORE_KEY) ?? '{}') as { commandLine2d?: unknown };
+    return v.commandLine2d === true;
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [initialLayout] = useState(loadLayout);
@@ -194,6 +205,14 @@ export default function App() {
       // 無法儲存時忽略
     }
   }, [drawStyle]);
+  const [commandLine2d, setCommandLine2d] = useState(loadCommandLine2d);
+  useEffect(() => {
+    try {
+      localStorage.setItem(WINDOWS_STORE_KEY, JSON.stringify({ commandLine2d }));
+    } catch {
+      // 無法儲存時忽略
+    }
+  }, [commandLine2d]);
   const pipe3dOptions = useMemo(() => ({ heightMode, section, exaggeration }), [heightMode, section, exaggeration]);
 
   // ---- 3D：第一次切到含 3D 的模式才建立 Cesium，之後保留
@@ -256,6 +275,8 @@ export default function App() {
         onOpenScaleSettings={() => setScaleSettingsOpen(true)}
         onOpenCoordSettings={() => setCoordSettingsOpen(true)}
         onOpenStyleSettings={() => setStyleSettingsOpen(true)}
+        commandLine2d={commandLine2d}
+        onCommandLine2dChange={setCommandLine2d}
       />
       <MaterialFilterDrawer
         open={materialFilterOpen}
@@ -321,6 +342,9 @@ export default function App() {
               scaleBar={scaleBar}
               measureStyle={measureStyle}
               drawStyle={drawStyle}
+              coordDisplay={coordDisplay}
+              commandLineOpen={commandLine2d}
+              onCommandLineClose={() => setCommandLine2d(false)}
               mapRef={mapRef}
               onZoomChange={setZoom}
               onTileError={setTileError}

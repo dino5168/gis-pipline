@@ -539,6 +539,50 @@ export class DrawTool {
     this.emit();
   }
 
+  /** 加入一條線（命令列 LINE 用；坐標為經緯度），記入復原；無效時回傳 null */
+  addLineString(coords: LngLat[]): FeatureId | null {
+    const d = this.draw;
+    if (!d?.enabled || coords.length < 2) return null;
+    this.endTextEdit(true);
+    const id = crypto.randomUUID();
+    const feature: GeoJSONStoreFeatures = {
+      type: 'Feature',
+      id,
+      geometry: { type: 'LineString', coordinates: coords.map(([x, y]) => [round(x), round(y)]) },
+      properties: { mode: 'linestring' },
+    };
+    let ok = false;
+    this.restoring = true;
+    try {
+      ok = d.addFeatures([feature]).every((v) => v.valid);
+    } finally {
+      this.restoring = false;
+    }
+    if (!ok) return null;
+    this.currentId = id;
+    this.countFeatures();
+    this.checkpoint();
+    this.emit();
+    return id;
+  }
+
+  /** 刪除一個圖形（命令列 LINE 的復原用），記入復原 */
+  removeFeatureById(id: FeatureId): void {
+    const d = this.draw;
+    if (!d?.enabled || !d.hasFeature(id)) return;
+    if (this.selectedId === id) this.deselect();
+    this.restoring = true;
+    try {
+      d.removeFeatures([id]);
+    } finally {
+      this.restoring = false;
+    }
+    if (this.currentId === id) this.currentId = null;
+    this.countFeatures();
+    this.checkpoint();
+    this.emit();
+  }
+
   destroy(): void {
     this.endTextEdit(false);
     for (const m of this.textLabels.values()) m.remove();

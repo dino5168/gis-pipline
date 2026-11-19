@@ -1,4 +1,4 @@
-import { Box, Columns2, Crosshair, Map as MapIcon, Palette, Ruler } from 'lucide-react';
+import { Box, Columns2, Crosshair, Map as MapIcon, Palette, Ruler, SquareTerminal } from 'lucide-react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { VIEW_MODE_LABELS, type ViewMode } from '../types/view';
@@ -9,7 +9,14 @@ import { LayersMegaMenu } from './LayersMegaMenu';
 import { PipesMegaMenu } from './PipesMegaMenu';
 import type { PipeColorMode, PipeKindId } from '../types/pipeKind';
 import { MEGA_TILE_CLASS, MegaSection, MegaTileBody, TileIcon } from './MegaTile';
-import { Menubar, MenubarContent, MenubarItem, MenubarMenu, MenubarTrigger } from '@/components/ui/menubar';
+import {
+  Menubar,
+  MenubarCheckboxItem,
+  MenubarContent,
+  MenubarItem,
+  MenubarMenu,
+  MenubarTrigger,
+} from '@/components/ui/menubar';
 
 const MODE_ICONS: Record<ViewMode, ReactNode> = {
   '2d': <MapIcon />,
@@ -37,6 +44,9 @@ interface Props {
   onOpenScaleSettings: () => void;
   onOpenCoordSettings: () => void;
   onOpenStyleSettings: () => void;
+  /** 視窗 → 2D 命令列 */
+  commandLine2d: boolean;
+  onCommandLine2dChange: (open: boolean) => void;
 }
 
 /** 頂端選單列（Mega Menu：縮圖方格） */
@@ -52,6 +62,8 @@ export function AppMenu({
   onColorModeChange,
   onOpenMaterialFilter,
   onOpenPipe3DSettings,
+  commandLine2d,
+  onCommandLine2dChange,
   ...layers
 }: Props) {
   return (
@@ -85,6 +97,19 @@ export function AppMenu({
           onOpenMaterialFilter={onOpenMaterialFilter}
           onOpenPipe3DSettings={onOpenPipe3DSettings}
         />
+        <MenubarMenu>
+          <MenubarTrigger>視窗</MenubarTrigger>
+          <MenubarContent>
+            <MenubarCheckboxItem checked={commandLine2d} onCheckedChange={onCommandLine2dChange}>
+              <SquareTerminal />
+              2D 命令列
+            </MenubarCheckboxItem>
+            <MenubarCheckboxItem checked={false} disabled>
+              <SquareTerminal />
+              3D 命令列（待辦）
+            </MenubarCheckboxItem>
+          </MenubarContent>
+        </MenubarMenu>
         <MenubarMenu>
           <MenubarTrigger>設定</MenubarTrigger>
           <MenubarContent>

@@ -36,6 +36,10 @@ import type { MeasureMode, MeasureStyle } from '../types/measure';
 import { metersPerPixel } from './cameraScale';
 import { setPointerLngLat } from './pointerCoord';
 import type { ScaleBarSettings } from '../types/scaleBar';
+import type { CoordDisplaySettings } from '../types/coordSystem';
+import { CommandLineEngine } from './commandLine';
+import { CommandLineWindow } from '../components/CommandLineWindow';
+import type { CommandLineState } from '../types/commandLine';
 import type { PipeProperties } from '../types/pipe';
 import {
   PIPE_KINDS,
@@ -64,6 +68,11 @@ interface Props {
   measureStyle: MeasureStyle;
   /** 繪圖圖形樣式（設定 → 樣式） */
   drawStyle: DrawStyle;
+  /** 坐標系設定（命令列輸入、回顯坐標用） */
+  coordDisplay: CoordDisplaySettings;
+  /** 視窗 → 2D 命令列 */
+  commandLineOpen: boolean;
+  onCommandLineClose: () => void;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
@@ -141,6 +150,9 @@ export function MapView({
   scaleBar,
   measureStyle,
   drawStyle,
+  coordDisplay,
+  commandLineOpen,
+  onCommandLineClose,
   mapRef,
   onZoomChange,
   onTileError,
@@ -182,6 +194,9 @@ export function MapView({
   };
   const closeMeasureRef = useRef(closeMeasure);
   closeMeasureRef.current = closeMeasure;
+  // ---- 命令列（命令執行中與量測、繪圖互斥）
+  const cmdRef = useRef<CommandLineEngine | null>(null);
+  const [cmdState, setCmdState] = useState<CommandLineState | null>(null);
 
   // 用 ref 保存最新的 callback，避免地圖重建
   const cb = useRef({ onZoomChange, onTileError });
@@ -238,8 +253,18 @@ export function MapView({
       onExit: () => closeDrawRef.current(),
     });
     drawRef.current = draw;
-    /** 量測或繪圖中：暫停管線滑過／點選 */
-    const busy = () => measure.active || draw.active;
+    const cmd = new CommandLineEngine(map, {
+      onChange: setCmdState,
+      onStart: () => {
+        closeMeasureRef.current();
+        closeDrawRef.current();
+      },
+      sink: draw,
+    });
+    cmdRef.current = cmd;
+    cmd.emit();
+    /** 量測、繪圖或命令執行中：暫停管線滑過／點選 */
+    const busy = () => measure.active || draw.active || cmd.active;
 
     // ---- 滑過
     let hover: FeatureIdentifier | null = null;
@@ -281,6 +306,8 @@ export function MapView({
     });
 
     return () => {
+      cmd.destroy();
+      cmdRef.current = null;
       measure.destroy();
       measureRef.current = null;
       draw.destroy();
@@ -299,6 +326,13 @@ export function MapView({
   useEffect(() => {
     drawRef.current?.setStyle(drawStyle);
   }, [drawStyle]);
+  // ---- 命令列
+  useEffect(() => {
+    cmdRef.current?.setCoordSettings(coordDisplay);
+  }, [coordDisplay]);
+  useEffect(() => {
+    if (!commandLineOpen) cmdRef.current?.cancel();
+  }, [commandLineOpen]);
 
   // ---- 底圖切換
   useEffect(() => {
@@ -416,6 +450,7 @@ export function MapView({
           onToggleOpen={() => {
             if (measureOpen) closeMeasure();
             else {
+              cmdRef.current?.cancel();
               closeDraw();
               // 展開時預設距離量測
               setMeasureOpen(true);
@@ -431,6 +466,7 @@ export function MapView({
           onToggleOpen={() => {
             if (drawOpen) closeDraw();
             else {
+              cmdRef.current?.cancel();
               closeMeasure();
               setDrawOpen(true);
               drawRef.current?.setOpen(true);
@@ -449,6 +485,14 @@ export function MapView({
           onClear={() => drawRef.current?.clearAll()}
         />
       </div>
+      {commandLineOpen && cmdState && (
+        <CommandLineWindow
+          state={cmdState}
+          onSubmit={(t) => cmdRef.current?.submit(t)}
+          onCancel={() => cmdRef.current?.cancel()}
+          onClose={onCommandLineClose}
+        />
+      )}
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
     </div>
   );
