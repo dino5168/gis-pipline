@@ -6,8 +6,13 @@
 //   RECTANG（REC）矩形：兩角點；或 尺寸（D）長、寬，再點方向
 //   CIRCLE（C）   圓：中心＋半徑／直徑（D）、兩點（2P）、三點（3P）
 //   POINT（PO）   點：連續放置，Enter 結束
+//   SELECT        選取物件（單擊、框選），結束後保留為目前選取（醒目顯示）
+//   MOVE（M）     移動：選取物件（或用目前選取）→ 基準點 → 第二點
+//   COPY（CO）    複製：同 MOVE，可連續複製多份
+//   ROTATE（RO）  旋轉：基準點 → 角度（或參考 R、複製 C）
+//   ERASE（E）    刪除
 import type { XY } from './commandInput';
-import type { CommandMessage, CommandOption, CommandPrompt, CommandShapeMode } from '../types/commandLine';
+import type { CommandMessage, CommandOption, CommandPrompt, CommandShapeMode, XYTransform } from '../types/commandLine';
 
 type FeatureId = string | number;
 
@@ -25,6 +30,26 @@ export interface SessionContext {
   /** 加入圖形：point 為一點、linestring 為點串、其他為多邊形外環（不必封閉），失敗回傳 null（已記錄錯誤） */
   add(mode: CommandShapeMode, coords: XY | XY[]): FeatureId | null;
   remove(id: FeatureId): void;
+  /** 目前選取（引擎保存、醒目顯示） */
+  getSelection(): FeatureId[];
+  setSelection(ids: FeatureId[]): void;
+  /** 上一次命令用過的選取集（P） */
+  previousSelection(): FeatureId[];
+  allIds(): FeatureId[];
+  /** 單擊選取 */
+  pick(xy: XY): FeatureId | null;
+  /** 框選：依螢幕方向決定視窗或框選穿越 */
+  windowSelect(a: XY, b: XY): { ids: FeatureId[]; crossing: boolean };
+  /** 螢幕上的矩形框（兩角）換成平面坐標的四個角（地圖旋轉時框仍與螢幕平行） */
+  screenRect(a: XY, b: XY): XY[];
+  /** 圖形變換後的外形（預覽用） */
+  shapePreview(ids: FeatureId[], fn: XYTransform): Preview;
+  /** 變換（平移、旋轉）圖形，回傳成功數量 */
+  transform(ids: FeatureId[], fn: XYTransform): number;
+  /** 複製並變換圖形，回傳新圖形的 id */
+  copy(ids: FeatureId[], fn: XYTransform): FeatureId[];
+  /** 刪除圖形，回傳數量 */
+  erase(ids: FeatureId[]): number;
 }
 
 /** 預覽：虛線（點串）與小圓點 */
@@ -620,4 +645,432 @@ export class PointSession extends CommandSession {
   preview(): Preview {
     return NO_PREVIEW;
   }
+}
+
+// ---- 選取物件（SELECT、MOVE 共用）
+class ObjectSelector {
+  private readonly ctx: SessionContext;
+  private removing = false;
+  /** 框選的第一角 */
+  private corner: XY | null = null;
+
+  constructor(ctx: SessionContext) {
+    this.ctx = ctx;
+  }
+
+  step(command: string, withPrevious: boolean): Step {
+    if (this.corner) return { command, text: '指定對角點', options: [], input: 'point', base: this.corner };
+    const options = [opt('ALL', '全部'), this.removing ? opt('A', '加入') : opt('R', '移除')];
+    if (withPrevious) options.push(opt('P', '上一個'));
+    return { command, text: this.removing ? '移除物件或' : '選取物件或', options, input: 'point', base: null };
+  }
+
+  /** 處理選項；不是選取的選項回傳 false */
+  onKeyword(key: string): boolean {
+    if (key === 'ALL') this.apply(this.ctx.allIds());
+    else if (key === 'A') this.removing = false;
+    else if (key === 'R') this.removing = true;
+    else if (key === 'P') {
+      const prev = this.ctx.previousSelection();
+      if (!prev.length) this.ctx.log('error', '沒有上一個選取集');
+      else this.apply(prev);
+    } else return false;
+    return true;
+  }
+
+  onPoint(xy: XY) {
+    if (this.corner) {
+      const { ids, crossing } = this.ctx.windowSelect(this.corner, xy);
+      this.corner = null;
+      this.ctx.log('info', crossing ? '框選穿越（右 → 左）' : '視窗框選（左 → 右）');
+      this.apply(ids);
+      return;
+    }
+    const id = this.ctx.pick(xy);
+    if (id !== null) this.apply([id]);
+    else this.corner = xy;
+  }
+
+  /** Enter：有框選第一角時先取消框選；回傳是否已處理 */
+  onEnter(): boolean {
+    if (!this.corner) return false;
+    this.corner = null;
+    return true;
+  }
+
+  private apply(ids: FeatureId[]) {
+    const cur = new Set(this.ctx.getSelection());
+    let n = 0;
+    for (const id of ids) {
+      if (this.removing ? cur.delete(id) : !cur.has(id) && cur.add(id)) n++;
+    }
+    this.ctx.setSelection([...cur]);
+    this.ctx.log('info', this.removing ? `移除 ${n} 個，剩 ${cur.size} 個` : `找到 ${ids.length} 個（新增 ${n}），共 ${cur.size} 個`);
+  }
+
+  preview(cursor: XY | null): Preview {
+    if (!this.corner) return NO_PREVIEW;
+    if (!cursor) return { points: [this.corner], lines: [] };
+    return { points: [this.corner], lines: [closeRing(this.ctx.screenRect(this.corner, cursor))] };
+  }
+}
+
+// ---- SELECT
+export class SelectSession extends CommandSession {
+  readonly name = 'SELECT';
+  private readonly selector: ObjectSelector;
+
+  constructor(ctx: SessionContext) {
+    super(ctx);
+    this.selector = new ObjectSelector(ctx);
+    ctx.setSelection([]);
+  }
+
+  step(): Step {
+    return this.selector.step(this.name, true);
+  }
+
+  onKeyword(key: string) {
+    this.selector.onKeyword(key);
+  }
+
+  onPoint(xy: XY) {
+    this.selector.onPoint(xy);
+  }
+
+  onEnter() {
+    if (this.selector.onEnter()) return;
+    const n = this.ctx.getSelection().length;
+    this.ctx.log('info', n ? `已選取 ${n} 個物件（Esc 清除選取）` : '沒有選取物件');
+    this.done = true;
+  }
+
+  /** Esc：取消選取（同 AutoCAD） */
+  onCancel() {
+    this.ctx.setSelection([]);
+    this.done = true;
+  }
+
+  preview(cursor: XY | null): Preview {
+    return this.selector.preview(cursor);
+  }
+}
+
+// ---- 修改命令（MOVE、COPY、ROTATE、ERASE）共用：先選取物件，再進入各自的步驟
+export abstract class EditSession extends CommandSession {
+  private readonly selector: ObjectSelector;
+  /** 選取完成後要處理的物件 */
+  protected ids: FeatureId[] = [];
+  protected selecting = true;
+
+  constructor(ctx: SessionContext) {
+    super(ctx);
+    this.selector = new ObjectSelector(ctx);
+  }
+
+  /** 建構後由引擎呼叫：已有目前選取就直接進下一步 */
+  begin(): void {
+    const cur = this.ctx.getSelection();
+    if (!cur.length) return;
+    this.ctx.log('info', `使用目前選取的 ${cur.length} 個物件`);
+    this.ids = cur;
+    this.selecting = false;
+    this.selected();
+  }
+
+  /** 選取完成 */
+  protected abstract selected(): void;
+  protected abstract editStep(): Step;
+  protected abstract editPoint(xy: XY): void;
+  protected editNumber(_n: number): void {}
+  protected editKeyword(_key: string): void {}
+  /** 編輯階段的 Enter：預設結束 */
+  protected editEnter(): void {
+    this.finish();
+  }
+  protected editPreview(_cursor: XY | null): Preview {
+    return NO_PREVIEW;
+  }
+
+  step(): Step {
+    return this.selecting ? this.selector.step(this.name, true) : this.editStep();
+  }
+
+  onKeyword(key: string) {
+    if (this.selecting) this.selector.onKeyword(key);
+    else this.editKeyword(key);
+  }
+
+  onPoint(xy: XY) {
+    if (this.selecting) this.selector.onPoint(xy);
+    else this.editPoint(xy);
+  }
+
+  onNumber(n: number) {
+    if (!this.selecting) this.editNumber(n);
+  }
+
+  onEnter() {
+    if (!this.selecting) return this.editEnter();
+    if (this.selector.onEnter()) return;
+    this.ids = this.ctx.getSelection();
+    if (!this.ids.length) {
+      this.error('沒有選取物件');
+      this.done = true;
+      return;
+    }
+    this.selecting = false;
+    this.selected();
+  }
+
+  preview(cursor: XY | null): Preview {
+    return this.selecting ? this.selector.preview(cursor) : this.editPreview(cursor);
+  }
+
+  /** 結束並清除選取（之後可用 P 叫回） */
+  protected finish() {
+    this.ctx.setSelection([]);
+    this.done = true;
+  }
+
+  onCancel() {
+    this.finish();
+  }
+}
+
+const translate =
+  (dx: number, dy: number): XYTransform =>
+  ([x, y]) => [x + dx, y + dy];
+
+const rotateAbout =
+  (c: XY, t: number): XYTransform =>
+  ([x, y]) => {
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    return [c[0] + (x - c[0]) * cos - (y - c[1]) * sin, c[1] + (x - c[0]) * sin + (y - c[1]) * cos];
+  };
+
+const toDeg = (r: number) => (r * 180) / Math.PI;
+const toRad = (d: number) => (d * Math.PI) / 180;
+
+/** 物件外形預覽加上基準點與橡皮筋線 */
+function withGuide(pv: Preview, base: XY, cursor: XY): Preview {
+  return { points: [base, ...pv.points], lines: [[base, cursor], ...pv.lines] };
+}
+
+// ---- MOVE、COPY（基準點 → 第二點）
+abstract class DisplaceSession extends EditSession {
+  protected basePoint: XY | null = null;
+
+  protected selected() {}
+
+  protected editStep(): Step {
+    if (!this.basePoint) return { command: this.name, text: '指定基準點', options: [], input: 'point', base: null };
+    return this.secondStep();
+  }
+
+  protected abstract secondStep(): Step;
+  protected abstract displace(dx: number, dy: number): void;
+
+  protected editPoint(xy: XY) {
+    if (!this.basePoint) {
+      this.basePoint = xy;
+      return;
+    }
+    const dx = xy[0] - this.basePoint[0];
+    const dy = xy[1] - this.basePoint[1];
+    if (Math.hypot(dx, dy) < EPS) return this.error('第二點與基準點相同');
+    this.displace(dx, dy);
+  }
+
+  protected editPreview(cursor: XY | null): Preview {
+    const b = this.basePoint;
+    if (!b) return NO_PREVIEW;
+    if (!cursor) return { points: [b], lines: [] };
+    return withGuide(this.ctx.shapePreview(this.ids, translate(cursor[0] - b[0], cursor[1] - b[1])), b, cursor);
+  }
+
+  protected describe(dx: number, dy: number) {
+    return `ΔX ${fmt(dx)} m、ΔY ${fmt(dy)} m（距離 ${fmt(Math.hypot(dx, dy))} m）`;
+  }
+}
+
+export class MoveSession extends DisplaceSession {
+  readonly name = 'MOVE';
+
+  protected secondStep(): Step {
+    return { command: this.name, text: '指定第二點（可輸入 @dx,dy）', options: [], input: 'point', base: this.basePoint };
+  }
+
+  protected displace(dx: number, dy: number) {
+    const n = this.ctx.transform(this.ids, translate(dx, dy));
+    this.ctx.log('info', `已移動 ${n} 個物件：${this.describe(dx, dy)}`);
+    this.finish();
+  }
+}
+
+export class CopySession extends DisplaceSession {
+  readonly name = 'COPY';
+  /** 每次複製產生的新物件（U 復原用） */
+  private copies: FeatureId[][] = [];
+
+  protected secondStep(): Step {
+    return {
+      command: this.name,
+      text: this.copies.length ? '指定第二點（Enter 結束）或' : '指定第二點（可輸入 @dx,dy）',
+      options: this.copies.length ? [OPT_UNDO] : [],
+      input: 'point',
+      base: this.basePoint,
+    };
+  }
+
+  protected displace(dx: number, dy: number) {
+    const ids = this.ctx.copy(this.ids, translate(dx, dy));
+    if (!ids.length) return this.error('複製失敗');
+    this.copies.push(ids);
+    this.ctx.log('info', `已複製 ${ids.length} 個物件：${this.describe(dx, dy)}`);
+  }
+
+  protected editKeyword(key: string) {
+    if (key !== 'U') return;
+    const last = this.copies.pop();
+    if (last) {
+      this.ctx.erase(last);
+      this.ctx.log('info', `已復原上一份複製（${last.length} 個物件）`);
+    }
+  }
+
+  protected editEnter() {
+    if (this.copies.length) this.ctx.log('info', `共複製 ${this.copies.length} 份`);
+    this.finish();
+  }
+}
+
+// ---- ROTATE
+type RotateStage = 'base' | 'angle' | 'ref1' | 'ref2' | 'new';
+
+export class RotateSession extends EditSession {
+  readonly name = 'ROTATE';
+  private static lastAngle = 0;
+  private stage: RotateStage = 'base';
+  private center: XY | null = null;
+  private copyMode = false;
+  /** 參考角度（弧度） */
+  private refAngle = 0;
+  private refStart: XY | null = null;
+
+  protected selected() {}
+
+  protected editStep(): Step {
+    const c = this.name;
+    switch (this.stage) {
+      case 'base':
+        return { command: c, text: '指定基準點', options: [], input: 'point', base: null };
+      case 'angle':
+        return {
+          command: c,
+          text: this.copyMode ? '指定旋轉角度（複製）或' : '指定旋轉角度或',
+          options: [opt('C', this.copyMode ? '不複製' : '複製'), opt('R', '參考')],
+          def: fmtNum(RotateSession.lastAngle),
+          input: 'pointOrNumber',
+          base: this.center,
+        };
+      case 'ref1':
+        return { command: c, text: '指定參考角度（度）或點選參考線第一點', options: [], def: '0', input: 'pointOrNumber', base: null };
+      case 'ref2':
+        return { command: c, text: '指定參考線第二點', options: [], input: 'point', base: this.refStart };
+      case 'new':
+        return { command: c, text: '指定新角度（度）或點選', options: [], input: 'pointOrNumber', base: this.center };
+    }
+  }
+
+  protected editKeyword(key: string) {
+    if (this.stage !== 'angle') return;
+    if (key === 'C') {
+      this.copyMode = !this.copyMode;
+      this.ctx.log('info', this.copyMode ? '旋轉一份複本（保留原物件）' : '旋轉原物件');
+    } else if (key === 'R') this.stage = 'ref1';
+  }
+
+  protected editNumber(n: number) {
+    if (this.stage === 'angle') this.rotate(toRad(n));
+    else if (this.stage === 'ref1') {
+      this.refAngle = toRad(n);
+      this.stage = 'new';
+    } else if (this.stage === 'new') this.rotate(toRad(n) - this.refAngle);
+  }
+
+  protected editPoint(xy: XY) {
+    const c = this.center;
+    switch (this.stage) {
+      case 'base':
+        this.center = xy;
+        this.stage = 'angle';
+        return;
+      case 'angle':
+        if (dist(c!, xy) < EPS) return this.error('請點選與基準點不同的點');
+        return this.rotate(angle(c!, xy));
+      case 'ref1':
+        this.refStart = xy;
+        this.stage = 'ref2';
+        return;
+      case 'ref2':
+        if (dist(this.refStart!, xy) < EPS) return this.error('兩點不可相同');
+        this.refAngle = angle(this.refStart!, xy);
+        this.stage = 'new';
+        return;
+      case 'new':
+        if (dist(c!, xy) < EPS) return this.error('請點選與基準點不同的點');
+        return this.rotate(angle(c!, xy) - this.refAngle);
+    }
+  }
+
+  protected editEnter() {
+    if (this.stage === 'angle') this.rotate(toRad(RotateSession.lastAngle));
+    else if (this.stage === 'ref1') {
+      this.refAngle = 0;
+      this.stage = 'new';
+    } else this.finish();
+  }
+
+  private rotate(t: number) {
+    const fn = rotateAbout(this.center!, t);
+    const d = toDeg(t);
+    if (this.copyMode) {
+      const ids = this.ctx.copy(this.ids, fn);
+      this.ctx.log('info', `已複製並旋轉 ${ids.length} 個物件：${fmtNum(d)}°`);
+    } else {
+      const n = this.ctx.transform(this.ids, fn);
+      this.ctx.log('info', `已旋轉 ${n} 個物件：${fmtNum(d)}°`);
+    }
+    RotateSession.lastAngle = Number(d.toFixed(6));
+    this.finish();
+  }
+
+  protected editPreview(cursor: XY | null): Preview {
+    const c = this.center;
+    if (!c) return NO_PREVIEW;
+    if (this.stage === 'ref2' && this.refStart && cursor) return { points: [c, this.refStart], lines: [[this.refStart, cursor]] };
+    if (!cursor || (this.stage !== 'angle' && this.stage !== 'new') || dist(c, cursor) < EPS) return { points: [c], lines: [] };
+    const t = angle(c, cursor) - (this.stage === 'new' ? this.refAngle : 0);
+    return withGuide(this.ctx.shapePreview(this.ids, rotateAbout(c, t)), c, cursor);
+  }
+}
+
+// ---- ERASE
+export class EraseSession extends EditSession {
+  readonly name = 'ERASE';
+
+  protected selected() {
+    const n = this.ctx.erase(this.ids);
+    this.ctx.log('info', `已刪除 ${n} 個物件（可在繪圖面板復原）`);
+    this.finish();
+  }
+
+  /** 選取完成後立即結束，不會用到 */
+  protected editStep(): Step {
+    return { command: this.name, text: '', options: [], input: 'keyword', base: null };
+  }
+
+  protected editPoint() {}
 }

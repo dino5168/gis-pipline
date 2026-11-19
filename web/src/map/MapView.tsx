@@ -38,6 +38,7 @@ import { setPointerLngLat } from './pointerCoord';
 import type { ScaleBarSettings } from '../types/scaleBar';
 import type { CoordDisplaySettings } from '../types/coordSystem';
 import { CommandLineEngine } from './commandLine';
+import { CommandHelpDrawer } from '../components/CommandHelpDrawer';
 import { CommandLineWindow } from '../components/CommandLineWindow';
 import type { CommandLineState } from '../types/commandLine';
 import type { PipeProperties } from '../types/pipe';
@@ -197,6 +198,8 @@ export function MapView({
   // ---- 命令列（命令執行中與量測、繪圖互斥）
   const cmdRef = useRef<CommandLineEngine | null>(null);
   const [cmdState, setCmdState] = useState<CommandLineState | null>(null);
+  /** 命令說明面板（HELP、?、F1）；topic＝要標示的命令 */
+  const [cmdHelp, setCmdHelp] = useState<{ open: boolean; topic: string | null }>({ open: false, topic: null });
 
   // 用 ref 保存最新的 callback，避免地圖重建
   const cb = useRef({ onZoomChange, onTileError });
@@ -248,13 +251,18 @@ export function MapView({
     });
     measureRef.current = measure;
     const draw = new DrawTool(map, {
-      onChange: setDrawStatus,
+      onChange: (s) => {
+        setDrawStatus(s);
+        // 圖形被編輯、刪除、復原時更新命令列的選取醒目顯示
+        cmdRef.current?.refresh();
+      },
       onModeRequest: (mode) => changeDrawModeRef.current(mode),
       onExit: () => closeDrawRef.current(),
     });
     drawRef.current = draw;
     const cmd = new CommandLineEngine(map, {
       onChange: setCmdState,
+      onHelp: (topic) => setCmdHelp({ open: true, topic }),
       onStart: () => {
         closeMeasureRef.current();
         closeDrawRef.current();
@@ -491,8 +499,14 @@ export function MapView({
           onSubmit={(t) => cmdRef.current?.submit(t)}
           onCancel={() => cmdRef.current?.cancel()}
           onClose={onCommandLineClose}
+          onHelp={() => cmdRef.current?.help()}
         />
       )}
+      <CommandHelpDrawer
+        open={cmdHelp.open}
+        onOpenChange={(open) => setCmdHelp((h) => ({ ...h, open }))}
+        topic={cmdHelp.topic}
+      />
       <ScaleBar settings={scaleBar} metersPerPixel={mpp} attribution={attribution} />
     </div>
   );

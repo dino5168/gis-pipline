@@ -10,7 +10,7 @@
 // 儲存：每次記入復原紀錄時存到 localStorage（utl.drawings），下次開啟自動載入；匯出／匯入 GeoJSON 見 drawIO.ts。
 // 樣式：Terra Draw 的樣式用函式讀取 this.style，改樣式後觸發一次重繪即套用到所有圖形。
 import type { Feature, FeatureCollection, LineString, Point, Polygon, Position } from 'geojson';
-import type { CommandShapeMode } from '../types/commandLine';
+import type { CommandShapeMode, XYTransform } from '../types/commandLine';
 import * as maplibregl from 'maplibre-gl';
 import {
   TerraDraw,
@@ -584,6 +584,109 @@ export class DrawTool {
     this.countFeatures();
     this.checkpoint();
     this.emit();
+  }
+
+  /** 使用者畫好的圖形（命令列選取用；坐標為經緯度） */
+  getShapes(): { id: FeatureId; geometry: Point | LineString | Polygon }[] {
+    const d = this.draw;
+    if (!d?.enabled) return [];
+    return d
+      .getSnapshot()
+      .filter(isUserFeature)
+      .map((f) => ({ id: f.id as FeatureId, geometry: f.geometry as Point | LineString | Polygon }));
+  }
+
+  /** 依 TWD97 坐標轉換函式產生新的幾何（四捨五入後多邊形環首尾相同） */
+  private transformGeometry(g: GeoJSONStoreGeometries, fn: XYTransform): GeoJSONStoreGeometries {
+    const tf = (p: Position) => {
+      const q = twd97ToLngLat(...fn(lngLatToTwd97(p[0], p[1])));
+      return [round(q[0]), round(q[1])];
+    };
+    if (g.type === 'Point') return { type: 'Point', coordinates: tf(g.coordinates) };
+    if (g.type === 'LineString') return { type: 'LineString', coordinates: g.coordinates.map(tf) };
+    const rings = g.coordinates.map((r) => r.map(tf));
+    for (const r of rings) r[r.length - 1] = [...r[0]];
+    return { type: 'Polygon', coordinates: rings };
+  }
+
+  /** 變換圖形（命令列 MOVE、ROTATE 用；fn 為 TWD97 坐標轉換），整批記一筆復原；回傳成功數量 */
+  transformFeatures(ids: FeatureId[], fn: XYTransform): number {
+    const d = this.draw;
+    if (!d?.enabled) return 0;
+    this.endTextEdit(true);
+    this.deselect();
+    let n = 0;
+    this.restoring = true;
+    try {
+      for (const id of ids) {
+        const f = d.hasFeature(id) ? d.getSnapshotFeature(id) : undefined;
+        if (!f) continue;
+        try {
+          d.updateFeatureGeometry(id, this.transformGeometry(f.geometry, fn));
+          n++;
+        } catch (err) {
+          console.warn('[draw] 變換失敗', id, err);
+        }
+      }
+    } finally {
+      this.restoring = false;
+    }
+    this.syncTextLabels();
+    this.checkpoint();
+    this.emit();
+    return n;
+  }
+
+  /** 複製圖形（命令列 COPY 用；保留樣式、文字等屬性），整批記一筆復原；回傳新圖形的 id */
+  copyFeatures(ids: FeatureId[], fn: XYTransform): FeatureId[] {
+    const d = this.draw;
+    if (!d?.enabled) return [];
+    this.endTextEdit(true);
+    const add: GeoJSONStoreFeatures[] = [];
+    for (const id of ids) {
+      const f = d.hasFeature(id) ? d.getSnapshotFeature(id) : undefined;
+      if (!f || !isUserFeature(f)) continue;
+      const s = snapshotFeature(f);
+      add.push({ ...s, id: crypto.randomUUID(), geometry: this.transformGeometry(f.geometry, fn) });
+    }
+    if (!add.length) return [];
+    let ok: FeatureId[] = [];
+    this.restoring = true;
+    try {
+      ok = d
+        .addFeatures(add)
+        .filter((v) => v.valid)
+        .map((v) => v.id as FeatureId);
+    } finally {
+      this.restoring = false;
+    }
+    this.countFeatures();
+    this.syncTextLabels();
+    this.checkpoint();
+    this.emit();
+    return ok;
+  }
+
+  /** 刪除多個圖形（命令列 ERASE 用），整批記一筆復原；回傳刪除數量 */
+  eraseFeatures(ids: FeatureId[]): number {
+    const d = this.draw;
+    if (!d?.enabled) return 0;
+    this.endTextEdit(true);
+    const exist = ids.filter((id) => d.hasFeature(id));
+    if (!exist.length) return 0;
+    this.deselect();
+    this.restoring = true;
+    try {
+      d.removeFeatures(exist);
+    } finally {
+      this.restoring = false;
+    }
+    if (this.currentId !== null && exist.includes(this.currentId)) this.currentId = null;
+    this.countFeatures();
+    this.syncTextLabels();
+    this.checkpoint();
+    this.emit();
+    return exist.length;
   }
 
   destroy(): void {

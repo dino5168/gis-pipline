@@ -1,7 +1,7 @@
 // 2D 命令列視窗（浮動在 2D 圖台底部中央，仿 AutoCAD Command）。
 // 鍵盤：Enter／空白鍵送出（空白＝結束命令或重複上一個命令）、Esc 取消、↑↓ 叫回之前的輸入；
 // 焦點不在其他輸入框時，直接打字會自動進到命令列。
-import { ChevronDown, ChevronUp, SquareTerminal, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, CircleHelp, SquareTerminal, X } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,8 @@ interface Props {
   onSubmit: (text: string) => void;
   onCancel: () => void;
   onClose: () => void;
+  /** 開啟命令說明（? 按鈕、F1） */
+  onHelp: () => void;
 }
 
 /** 收合／展開時顯示的訊息行數 */
@@ -23,7 +25,7 @@ const MAX_INPUT_HISTORY = 50;
 const isTypingTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
-export function CommandLineWindow({ state, onSubmit, onCancel, onClose }: Props) {
+export function CommandLineWindow({ state, onSubmit, onCancel, onClose, onHelp }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [value, setValue] = useState('');
@@ -32,8 +34,8 @@ export function CommandLineWindow({ state, onSubmit, onCancel, onClose }: Props)
   /** 正在瀏覽的歷史位置（history.length＝目前輸入） */
   const [histIndex, setHistIndex] = useState(0);
 
-  const cb = useRef({ onSubmit, onCancel, active: state.active });
-  cb.current = { onSubmit, onCancel, active: state.active };
+  const cb = useRef({ onSubmit, onCancel, onHelp, active: state.active, selected: state.selectionCount > 0 });
+  cb.current = { onSubmit, onCancel, onHelp, active: state.active, selected: state.selectionCount > 0 };
 
   // 開啟時取得焦點
   useEffect(() => {
@@ -49,10 +51,16 @@ export function CommandLineWindow({ state, onSubmit, onCancel, onClose }: Props)
   // 焦點在地圖或頁面上時：打字進命令列；Esc 取消、Enter 結束命令
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
+      // F1：命令說明（不讓瀏覽器開自己的說明）
+      if (e.key === 'F1') {
+        e.preventDefault();
+        cb.current.onHelp();
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
       const input = inputRef.current;
       if (!input) return;
-      if (e.key === 'Escape' && cb.current.active) {
+      if (e.key === 'Escape' && (cb.current.active || cb.current.selected)) {
         cb.current.onCancel();
       } else if (e.key === 'Enter' && cb.current.active && !(e.target instanceof HTMLButtonElement)) {
         e.preventDefault();
@@ -135,6 +143,9 @@ export function CommandLineWindow({ state, onSubmit, onCancel, onClose }: Props)
           >
             {expanded ? <ChevronDown /> : <ChevronUp />}
           </Button>
+          <Button variant="ghost" size="icon-xs" title="命令說明（F1）" aria-label="命令說明" onClick={onHelp}>
+            <CircleHelp />
+          </Button>
           <Button variant="ghost" size="icon-xs" title="關閉命令列" aria-label="關閉命令列" onClick={onClose}>
             <X />
           </Button>
@@ -143,6 +154,11 @@ export function CommandLineWindow({ state, onSubmit, onCancel, onClose }: Props)
       <label className="border-border bg-background/60 flex items-center gap-1.5 border-t px-2 py-1">
         <SquareTerminal className="text-muted-foreground size-3.5 shrink-0" />
         <span className="shrink-0 whitespace-nowrap">
+          {!state.active && state.selectionCount > 0 && (
+            <span className="text-primary" title="已選取的物件（MOVE 會直接使用；Esc 清除）">
+              已選取 {state.selectionCount} 個{' '}
+            </span>
+          )}
           {prompt.command && <span className="text-primary">{prompt.command} </span>}
           {prompt.text}
           {prompt.options.length > 0 && (
