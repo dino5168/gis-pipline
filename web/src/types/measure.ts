@@ -1,3 +1,5 @@
+import { OPACITY_RANGE, bool, clampNum, oneOf } from '@/lib/storage';
+
 /** 2D 量測模式：距離、面積（多邊形）、正方形、圓形 */
 export type MeasureMode = 'distance' | 'area' | 'square' | 'circle';
 
@@ -58,3 +60,15 @@ export const DEFAULT_MEASURE_STYLE: MeasureStyle = {
 };
 
 export const isHexColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
+
+/** 從儲存內容還原量測樣式（不合法的欄位用預設值） */
+export function parseMeasureStyle(v: Record<string, unknown>): MeasureStyle {
+  const d = DEFAULT_MEASURE_STYLE;
+  return {
+    color: isHexColor(v.color) ? v.color : d.color,
+    lineStyle: oneOf(v.lineStyle, MEASURE_LINE_STYLES, d.lineStyle),
+    lineWidth: clampNum(v.lineWidth, MEASURE_LINE_WIDTH_RANGE, d.lineWidth),
+    fillOpacity: clampNum(v.fillOpacity, OPACITY_RANGE, d.fillOpacity),
+    showArrows: bool(v.showArrows, d.showArrows),
+  };
+}

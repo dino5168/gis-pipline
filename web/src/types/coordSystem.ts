@@ -1,3 +1,5 @@
+import { bool, clampInt, oneOf } from '@/lib/storage';
+
 /** 坐標顯示用的坐標系 */
 export type CoordSystem = 'wgs84' | 'twd97' | 'twd67';
 
@@ -34,3 +36,15 @@ export const DEFAULT_COORD_DISPLAY: CoordDisplaySettings = {
   xDecimals: 4,
   yDecimals: 5,
 };
+
+/** 從儲存內容還原坐標顯示設定（不合法的欄位用預設值） */
+export function parseCoordDisplay(v: Record<string, unknown>): CoordDisplaySettings {
+  const d = DEFAULT_COORD_DISPLAY;
+  return {
+    visible: bool(v.visible, d.visible),
+    system: oneOf(v.system, COORD_SYSTEMS, d.system),
+    lngLatDecimals: clampInt(v.lngLatDecimals, LNGLAT_DECIMALS_RANGE, d.lngLatDecimals),
+    xDecimals: clampInt(v.xDecimals, XY_DECIMALS_RANGE, d.xDecimals),
+    yDecimals: clampInt(v.yDecimals, XY_DECIMALS_RANGE, d.yDecimals),
+  };
+}

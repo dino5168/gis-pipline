@@ -1,3 +1,5 @@
+import { bool, clampNum, oneOf } from '@/lib/storage';
+
 /** 比例尺樣式（參考 2-Tasks/1-UI/images/Ruler.png，由上而下） */
 export type ScaleBarStyle =
   | 'alternating' // 黑白交錯塊
@@ -38,3 +40,16 @@ export const DEFAULT_SCALE_BAR: ScaleBarSettings = {
   unit: 'metric',
   maxWidth: 200,
 };
+
+const SCALE_BAR_UNITS: { id: ScaleBarUnit }[] = [{ id: 'metric' }, { id: 'imperial' }];
+
+/** 從儲存內容還原比例尺設定（不合法的欄位用預設值） */
+export function parseScaleBar(v: Record<string, unknown>): ScaleBarSettings {
+  const d = DEFAULT_SCALE_BAR;
+  return {
+    visible: bool(v.visible, d.visible),
+    style: oneOf(v.style, SCALE_BAR_STYLES, d.style),
+    unit: oneOf(v.unit, SCALE_BAR_UNITS, d.unit),
+    maxWidth: clampNum(v.maxWidth, SCALE_BAR_MAX_WIDTH_RANGE, d.maxWidth),
+  };
+}

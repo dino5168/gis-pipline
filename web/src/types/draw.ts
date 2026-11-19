@@ -1,3 +1,6 @@
+import { OPACITY_RANGE, clampNum } from '@/lib/storage';
+import { isHexColor } from './measure';
+
 /** 2D 繪圖：圖形（新增）與編輯兩組模式；一次只啟用一種（同 Leaflet-Geoman） */
 export type DrawShapeMode = 'point' | 'linestring' | 'polygon' | 'rectangle' | 'circle' | 'text';
 export type DrawEditMode = 'select' | 'drag' | 'rotate' | 'cut' | 'delete';
@@ -55,6 +58,16 @@ export const DEFAULT_DRAW_STYLE: DrawStyle = {
   lineWidth: 2.5,
   fillOpacity: 0.2,
 };
+
+/** 從儲存內容還原繪圖樣式（不合法的欄位用預設值） */
+export function parseDrawStyle(v: Record<string, unknown>): DrawStyle {
+  const d = DEFAULT_DRAW_STYLE;
+  return {
+    color: isHexColor(v.color) ? v.color : d.color,
+    lineWidth: clampNum(v.lineWidth, DRAW_LINE_WIDTH_RANGE, d.lineWidth),
+    fillOpacity: clampNum(v.fillOpacity, OPACITY_RANGE, d.fillOpacity),
+  };
+}
 
 /** 文字標註的最大字數 */
 export const DRAW_TEXT_MAX_LENGTH = 100;

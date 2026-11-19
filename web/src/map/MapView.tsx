@@ -140,6 +140,23 @@ function buildStyle(initialBasemap: BasemapId, initialColorMode: PipeColorMode):
   return { version: 8, sources, layers };
 }
 
+/**
+ * 地圖樣式載入後執行 apply（已載入就立即執行）；回傳的清除函式給 useEffect 用，
+ * 避免依賴改變時舊的 apply 還在等 load。
+ */
+function whenStyleLoaded(map: maplibregl.Map | null, apply: (map: maplibregl.Map) => void): (() => void) | undefined {
+  if (!map) return;
+  if (map.isStyleLoaded()) {
+    apply(map);
+    return;
+  }
+  const onLoad = () => apply(map);
+  map.once('load', onLoad);
+  return () => {
+    map.off('load', onLoad);
+  };
+}
+
 export function MapView({
   basemap,
   overlays,
@@ -343,87 +360,75 @@ export function MapView({
   }, [commandLineOpen]);
 
   // ---- 底圖切換
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      for (const id of BASEMAP_IDS) {
-        if (!BASEMAPS[id].source) continue;
-        map.setLayoutProperty(basemapLayerId(id), 'visibility', id === basemap ? 'visible' : 'none');
-      }
-    };
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [basemap, mapRef]);
+  useEffect(
+    () =>
+      whenStyleLoaded(mapRef.current, (map) => {
+        for (const id of BASEMAP_IDS) {
+          if (!BASEMAPS[id].source) continue;
+          map.setLayoutProperty(basemapLayerId(id), 'visibility', id === basemap ? 'visible' : 'none');
+        }
+      }),
+    [basemap],
+  );
 
   // ---- 疊加圖層（地籍等）顯示與不透明度
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      for (const id of OVERLAY_IDS) {
-        map.setLayoutProperty(overlayLayerId(id), 'visibility', overlays.has(id) ? 'visible' : 'none');
-        map.setPaintProperty(overlayLayerId(id), 'raster-opacity', overlayOpacity);
-      }
-    };
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [overlays, overlayOpacity, mapRef]);
+  useEffect(
+    () =>
+      whenStyleLoaded(mapRef.current, (map) => {
+        for (const id of OVERLAY_IDS) {
+          map.setLayoutProperty(overlayLayerId(id), 'visibility', overlays.has(id) ? 'visible' : 'none');
+          map.setPaintProperty(overlayLayerId(id), 'raster-opacity', overlayOpacity);
+        }
+      }),
+    [overlays, overlayOpacity],
+  );
 
   // ---- 陰影地形
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      for (const id of TERRAIN_IDS) {
-        if (!TERRAINS[id].source) continue;
-        map.setLayoutProperty(hillshadeLayerId(id), 'visibility', id === terrain ? 'visible' : 'none');
-      }
-    };
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [terrain, mapRef]);
+  useEffect(
+    () =>
+      whenStyleLoaded(mapRef.current, (map) => {
+        for (const id of TERRAIN_IDS) {
+          if (!TERRAINS[id].source) continue;
+          map.setLayoutProperty(hillshadeLayerId(id), 'visibility', id === terrain ? 'visible' : 'none');
+        }
+      }),
+    [terrain],
+  );
 
   // ---- 材料篩選
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      const filter = materialFilter(enabledMaterials);
-      for (const k of PIPE_KIND_IDS) {
-        map.setFilter(pipeLayerId(k), filter);
-        map.setFilter(pipeCasingLayerId(k), filter);
-      }
-    };
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [enabledMaterials, mapRef]);
+  useEffect(
+    () =>
+      whenStyleLoaded(mapRef.current, (map) => {
+        const filter = materialFilter(enabledMaterials);
+        for (const k of PIPE_KIND_IDS) {
+          map.setFilter(pipeLayerId(k), filter);
+          map.setFilter(pipeCasingLayerId(k), filter);
+        }
+      }),
+    [enabledMaterials],
+  );
 
   // ---- 管線種類顯示
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      for (const k of PIPE_KIND_IDS) {
-        const v = enabledKinds.has(k) ? 'visible' : 'none';
-        map.setLayoutProperty(pipeLayerId(k), 'visibility', v);
-        map.setLayoutProperty(pipeCasingLayerId(k), 'visibility', v);
-      }
-    };
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [enabledKinds, mapRef]);
+  useEffect(
+    () =>
+      whenStyleLoaded(mapRef.current, (map) => {
+        for (const k of PIPE_KIND_IDS) {
+          const v = enabledKinds.has(k) ? 'visible' : 'none';
+          map.setLayoutProperty(pipeLayerId(k), 'visibility', v);
+          map.setLayoutProperty(pipeCasingLayerId(k), 'visibility', v);
+        }
+      }),
+    [enabledKinds],
+  );
 
   // ---- 著色方式
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      for (const k of PIPE_KINDS) map.setPaintProperty(pipeLayerId(k.id), 'line-color', pipeColor(k, colorMode));
-    };
-    if (map.isStyleLoaded()) apply();
-    else map.once('load', apply);
-  }, [colorMode, mapRef]);
+  useEffect(
+    () =>
+      whenStyleLoaded(mapRef.current, (map) => {
+        for (const k of PIPE_KINDS) map.setPaintProperty(pipeLayerId(k.id), 'line-color', pipeColor(k, colorMode));
+      }),
+    [colorMode],
+  );
 
   // ---- 出處：目前底圖＋開啟的疊加圖層（政府資料開放授權須顯名）
   const bm = BASEMAPS[basemap].source?.attribution;

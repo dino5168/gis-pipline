@@ -21,132 +21,30 @@ import { ScaleBarSettingsDrawer } from './components/ScaleBarSettingsDrawer';
 import { CoordinateDisplay } from './components/CoordinateDisplay';
 import { CoordSettingsDrawer } from './components/CoordSettingsDrawer';
 import { StyleSettingsDrawer } from './components/StyleSettingsDrawer';
-import {
-  DEFAULT_MEASURE_STYLE,
-  MEASURE_LINE_STYLES,
-  MEASURE_LINE_WIDTH_RANGE,
-  isHexColor,
-  type MeasureStyle,
-} from './types/measure';
-import { DEFAULT_DRAW_STYLE, DRAW_LINE_WIDTH_RANGE, type DrawStyle } from './types/draw';
-import {
-  DEFAULT_COORD_DISPLAY,
-  LNGLAT_DECIMALS_RANGE,
-  XY_DECIMALS_RANGE,
-  isCoordSystem,
-  type CoordDisplaySettings,
-} from './types/coordSystem';
-import {
-  DEFAULT_SCALE_BAR,
-  SCALE_BAR_MAX_WIDTH_RANGE,
-  SCALE_BAR_STYLES,
-  type ScaleBarSettings,
-} from './types/scaleBar';
+import { parseMeasureStyle } from './types/measure';
+import { parseDrawStyle } from './types/draw';
+import { parseCoordDisplay } from './types/coordSystem';
+import { parseScaleBar } from './types/scaleBar';
+import { readStored, usePersistentState, writeStored } from './lib/storage';
 
 // 版面偏好（只存在這台瀏覽器；讀寫失敗時用預設值）
-const STORE_KEY = 'utl.layout';
-function loadLayout(): { mode: ViewMode; ratio: number } {
-  try {
-    const v = JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}') as { mode?: ViewMode; ratio?: number };
-    return {
-      mode: v.mode === '2d' || v.mode === '3d' || v.mode === 'split' ? v.mode : '2d',
-      ratio: typeof v.ratio === 'number' ? clampRatio(v.ratio) : 0.5,
-    };
-  } catch {
-    return { mode: '2d', ratio: 0.5 };
-  }
+const LAYOUT_STORE_KEY = 'utl.layout';
+const VIEW_MODES: { id: ViewMode }[] = [{ id: '2d' }, { id: '3d' }, { id: 'split' }];
+function parseLayout(v: Record<string, unknown>): { mode: ViewMode; ratio: number } {
+  return {
+    mode: VIEW_MODES.find((m) => m.id === v.mode)?.id ?? '2d',
+    ratio: typeof v.ratio === 'number' && Number.isFinite(v.ratio) ? clampRatio(v.ratio) : 0.5,
+  };
 }
 
-// 比例尺設定（只存在這台瀏覽器；不合法的欄位用預設值）
-const SCALE_STORE_KEY = 'utl.scaleBar';
-function loadScaleBar(): ScaleBarSettings {
-  try {
-    const v = JSON.parse(localStorage.getItem(SCALE_STORE_KEY) ?? '{}') as Partial<ScaleBarSettings>;
-    const d = DEFAULT_SCALE_BAR;
-    const { min, max } = SCALE_BAR_MAX_WIDTH_RANGE;
-    return {
-      visible: typeof v.visible === 'boolean' ? v.visible : d.visible,
-      style: SCALE_BAR_STYLES.some((s) => s.id === v.style) ? v.style! : d.style,
-      unit: v.unit === 'metric' || v.unit === 'imperial' ? v.unit : d.unit,
-      maxWidth: typeof v.maxWidth === 'number' ? Math.min(Math.max(v.maxWidth, min), max) : d.maxWidth,
-    };
-  } catch {
-    return DEFAULT_SCALE_BAR;
-  }
-}
-
-// 坐標顯示設定（只存在這台瀏覽器；不合法的欄位用預設值）
-const COORD_STORE_KEY = 'utl.coordDisplay';
-function loadCoordDisplay(): CoordDisplaySettings {
-  const d = DEFAULT_COORD_DISPLAY;
-  const int = (v: unknown, r: { min: number; max: number }, def: number) =>
-    typeof v === 'number' && Number.isInteger(v) ? Math.min(Math.max(v, r.min), r.max) : def;
-  try {
-    const v = JSON.parse(localStorage.getItem(COORD_STORE_KEY) ?? '{}') as Partial<CoordDisplaySettings>;
-    return {
-      visible: typeof v.visible === 'boolean' ? v.visible : d.visible,
-      system: isCoordSystem(v.system) ? v.system : d.system,
-      lngLatDecimals: int(v.lngLatDecimals, LNGLAT_DECIMALS_RANGE, d.lngLatDecimals),
-      xDecimals: int(v.xDecimals, XY_DECIMALS_RANGE, d.xDecimals),
-      yDecimals: int(v.yDecimals, XY_DECIMALS_RANGE, d.yDecimals),
-    };
-  } catch {
-    return d;
-  }
-}
-
-// 量測樣式（只存在這台瀏覽器；不合法的欄位用預設值）
-const MEASURE_STYLE_STORE_KEY = 'utl.measureStyle';
-function loadMeasureStyle(): MeasureStyle {
-  const d = DEFAULT_MEASURE_STYLE;
-  const num = (v: unknown, min: number, max: number, def: number) =>
-    typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, min), max) : def;
-  try {
-    const v = JSON.parse(localStorage.getItem(MEASURE_STYLE_STORE_KEY) ?? '{}') as Partial<MeasureStyle>;
-    return {
-      color: isHexColor(v.color) ? v.color : d.color,
-      lineStyle: MEASURE_LINE_STYLES.some((s) => s.id === v.lineStyle) ? v.lineStyle! : d.lineStyle,
-      lineWidth: num(v.lineWidth, MEASURE_LINE_WIDTH_RANGE.min, MEASURE_LINE_WIDTH_RANGE.max, d.lineWidth),
-      fillOpacity: num(v.fillOpacity, 0, 1, d.fillOpacity),
-      showArrows: typeof v.showArrows === 'boolean' ? v.showArrows : d.showArrows,
-    };
-  } catch {
-    return d;
-  }
-}
-
-// 繪圖樣式（只存在這台瀏覽器；不合法的欄位用預設值）
-const DRAW_STYLE_STORE_KEY = 'utl.drawStyle';
-function loadDrawStyle(): DrawStyle {
-  const d = DEFAULT_DRAW_STYLE;
-  const num = (v: unknown, min: number, max: number, def: number) =>
-    typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, min), max) : def;
-  try {
-    const v = JSON.parse(localStorage.getItem(DRAW_STYLE_STORE_KEY) ?? '{}') as Partial<DrawStyle>;
-    return {
-      color: isHexColor(v.color) ? v.color : d.color,
-      lineWidth: num(v.lineWidth, DRAW_LINE_WIDTH_RANGE.min, DRAW_LINE_WIDTH_RANGE.max, d.lineWidth),
-      fillOpacity: num(v.fillOpacity, 0, 1, d.fillOpacity),
-    };
-  } catch {
-    return d;
-  }
-}
-
-// 視窗開關（只存在這台瀏覽器）
-const WINDOWS_STORE_KEY = 'utl.windows';
-function loadCommandLine2d(): boolean {
-  try {
-    const v = JSON.parse(localStorage.getItem(WINDOWS_STORE_KEY) ?? '{}') as { commandLine2d?: unknown };
-    return v.commandLine2d === true;
-  } catch {
-    return false;
-  }
+/** 視窗開關（只存在這台瀏覽器） */
+function parseWindows(v: Record<string, unknown>): { commandLine2d: boolean } {
+  return { commandLine2d: v.commandLine2d === true };
 }
 
 export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const [initialLayout] = useState(loadLayout);
+  const [initialLayout] = useState(() => readStored(LAYOUT_STORE_KEY, parseLayout));
   const [mode, setMode] = useState<ViewMode>(initialLayout.mode);
   const [splitRatio, setSplitRatio] = useState(initialLayout.ratio);
   const [basemap, setBasemap] = useState<BasemapId>('emap');
@@ -170,49 +68,19 @@ export default function App() {
   const [showFps, setShowFps] = useState(false);
   const [underground, setUnderground] = useState(false);
   const [pipe3dStatus, setPipe3dStatus] = useState<Pipe3DStatus>({ kind: 'off' });
-  const [scaleBar, setScaleBar] = useState<ScaleBarSettings>(loadScaleBar);
+  const [scaleBar, setScaleBar] = usePersistentState('utl.scaleBar', parseScaleBar);
   const [scaleSettingsOpen, setScaleSettingsOpen] = useState(false);
-  useEffect(() => {
-    try {
-      localStorage.setItem(SCALE_STORE_KEY, JSON.stringify(scaleBar));
-    } catch {
-      // 無法儲存時忽略
-    }
-  }, [scaleBar]);
-  const [coordDisplay, setCoordDisplay] = useState<CoordDisplaySettings>(loadCoordDisplay);
+  const [coordDisplay, setCoordDisplay] = usePersistentState('utl.coordDisplay', parseCoordDisplay);
   const [coordSettingsOpen, setCoordSettingsOpen] = useState(false);
-  useEffect(() => {
-    try {
-      localStorage.setItem(COORD_STORE_KEY, JSON.stringify(coordDisplay));
-    } catch {
-      // 無法儲存時忽略
-    }
-  }, [coordDisplay]);
-  const [measureStyle, setMeasureStyle] = useState<MeasureStyle>(loadMeasureStyle);
+  const [measureStyle, setMeasureStyle] = usePersistentState('utl.measureStyle', parseMeasureStyle);
   const [styleSettingsOpen, setStyleSettingsOpen] = useState(false);
-  useEffect(() => {
-    try {
-      localStorage.setItem(MEASURE_STYLE_STORE_KEY, JSON.stringify(measureStyle));
-    } catch {
-      // 無法儲存時忽略
-    }
-  }, [measureStyle]);
-  const [drawStyle, setDrawStyle] = useState<DrawStyle>(loadDrawStyle);
-  useEffect(() => {
-    try {
-      localStorage.setItem(DRAW_STYLE_STORE_KEY, JSON.stringify(drawStyle));
-    } catch {
-      // 無法儲存時忽略
-    }
-  }, [drawStyle]);
-  const [commandLine2d, setCommandLine2d] = useState(loadCommandLine2d);
-  useEffect(() => {
-    try {
-      localStorage.setItem(WINDOWS_STORE_KEY, JSON.stringify({ commandLine2d }));
-    } catch {
-      // 無法儲存時忽略
-    }
-  }, [commandLine2d]);
+  const [drawStyle, setDrawStyle] = usePersistentState('utl.drawStyle', parseDrawStyle);
+  const [windows, setWindows] = usePersistentState('utl.windows', parseWindows);
+  const commandLine2d = windows.commandLine2d;
+  const setCommandLine2d = useCallback(
+    (open: boolean) => setWindows((w) => ({ ...w, commandLine2d: open })),
+    [setWindows],
+  );
   const pipe3dOptions = useMemo(() => ({ heightMode, section, exaggeration }), [heightMode, section, exaggeration]);
 
   // ---- 3D：第一次切到含 3D 的模式才建立 Cesium，之後保留
@@ -234,13 +102,7 @@ export default function App() {
   }, []);
   useViewSync(mapRef, scene, activeRef);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({ mode, ratio: splitRatio }));
-    } catch {
-      // 無法儲存（隱私模式等）時忽略
-    }
-  }, [mode, splitRatio]);
+  useEffect(() => writeStored(LAYOUT_STORE_KEY, { mode, ratio: splitRatio }), [mode, splitRatio]);
 
   // 畫面中心在資料範圍內就原地放大，否則飛到台北市中心（由 2D 帶動，3D 跟著同步）
   const zoomToPipes = useCallback((zoom: number) => {
