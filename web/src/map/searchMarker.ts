@@ -11,7 +11,7 @@ export function setSearchMarker(map: maplibregl.Map, r: GeocodeResult | null) {
   if (!r) return;
   // 彈出視窗固定淺色底（index.css），文字顏色比照 PipeAttributeTable
   const label = document.createElement('div');
-  label.className = 'text-[13px] font-semibold text-slate-900';
+  label.className = 'text-[0.8125rem] font-semibold text-slate-900';
   label.textContent = r.label;
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 36 }).setDOMContent(label);
   const marker = new maplibregl.Marker({ color: SEARCH_MARKER_COLOR })

@@ -21,6 +21,9 @@ import { ScaleBarSettingsDrawer } from './components/ScaleBarSettingsDrawer';
 import { CoordinateDisplay } from './components/CoordinateDisplay';
 import { CoordSettingsDrawer } from './components/CoordSettingsDrawer';
 import { StyleSettingsDrawer } from './components/StyleSettingsDrawer';
+import { SystemStyleDrawer } from './components/SystemStyleDrawer';
+import { applySystemStyle } from './lib/theme';
+import { parseSystemStyle, SYSTEM_STYLE_KEY } from './types/systemStyle';
 import { parseMeasureStyle } from './types/measure';
 import { parseDrawStyle } from './types/draw';
 import { parseCoordDisplay } from './types/coordSystem';
@@ -80,6 +83,9 @@ export default function App() {
   const [styleSettingsOpen, setStyleSettingsOpen] = useState(false);
   const [drawStyle, setDrawStyle] = usePersistentState('utl.drawStyle', parseDrawStyle);
   const [windows, setWindows] = usePersistentState('utl.windows', parseWindows);
+  const [systemStyle, setSystemStyle] = usePersistentState(SYSTEM_STYLE_KEY, parseSystemStyle);
+  const [systemStyleOpen, setSystemStyleOpen] = useState(false);
+  useEffect(() => applySystemStyle(systemStyle), [systemStyle]);
   const commandLine2d = windows.commandLine2d;
   const setCommandLine2d = useCallback(
     (open: boolean) => setWindows((w) => ({ ...w, commandLine2d: open })),
@@ -169,6 +175,7 @@ export default function App() {
         onOpenScaleSettings={() => setScaleSettingsOpen(true)}
         onOpenCoordSettings={() => setCoordSettingsOpen(true)}
         onOpenStyleSettings={() => setStyleSettingsOpen(true)}
+        onOpenSystemStyle={() => setSystemStyleOpen(true)}
         commandLine2d={commandLine2d}
         onCommandLine2dChange={setCommandLine2d}
         search={<AddressSearch onSelect={locate} onClear={() => setSearchResult(null)} />}
@@ -218,6 +225,12 @@ export default function App() {
         onMeasureStyleChange={setMeasureStyle}
         drawStyle={drawStyle}
         onDrawStyleChange={setDrawStyle}
+      />
+      <SystemStyleDrawer
+        open={systemStyleOpen}
+        onOpenChange={setSystemStyleOpen}
+        settings={systemStyle}
+        onChange={setSystemStyle}
       />
       <div className="relative flex min-h-0 flex-1">
         <SplitView

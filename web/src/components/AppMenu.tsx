@@ -1,4 +1,4 @@
-import { Box, Columns2, Crosshair, Map as MapIcon, Palette, Ruler, SquareTerminal } from 'lucide-react';
+import { Box, Columns2, Crosshair, Map as MapIcon, Monitor, Palette, Ruler, SquareTerminal } from 'lucide-react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { VIEW_MODE_LABELS, type ViewMode } from '../types/view';
@@ -44,6 +44,7 @@ interface Props {
   onOpenScaleSettings: () => void;
   onOpenCoordSettings: () => void;
   onOpenStyleSettings: () => void;
+  onOpenSystemStyle: () => void;
   /** 視窗 → 2D 命令列 */
   commandLine2d: boolean;
   onCommandLine2dChange: (open: boolean) => void;
@@ -58,6 +59,7 @@ export function AppMenu({
   onOpenScaleSettings,
   onOpenCoordSettings,
   onOpenStyleSettings,
+  onOpenSystemStyle,
   enabledKinds,
   onKindsChange,
   colorMode,
@@ -126,7 +128,11 @@ export function AppMenu({
             </MenubarItem>
             <MenubarItem onSelect={onOpenStyleSettings}>
               <Palette />
-              樣式
+              量測與繪圖樣式
+            </MenubarItem>
+            <MenubarItem onSelect={onOpenSystemStyle}>
+              <Monitor />
+              系統樣式
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>

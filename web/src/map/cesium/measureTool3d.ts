@@ -22,6 +22,7 @@ import { formatArea, formatDistance, polygonArea, polygonLabelPoint, segmentLeng
 import { formatDh, formatHeight, segment3D } from '../measure3d';
 import { DEFAULT_MEASURE_STYLE, type MeasureStyle } from '../../types/measure';
 import type { Measure3DMode, Measure3DResult, MeasurePoint3D } from '../../types/measure3d';
+import { uiCanvasFont } from '../../lib/theme';
 
 /** 新點與前一點在螢幕上距離小於此值（px）視為同一點（雙擊會先觸發兩次 click） */
 const SAME_POINT_PX = 4;
@@ -181,7 +182,7 @@ export class MeasureTool3D {
       position,
       label: {
         text,
-        font: `${opts?.strong ? 'bold ' : ''}13px "Noto Sans TC", "Microsoft JhengHei", sans-serif`,
+        font: uiCanvasFont(13, opts?.strong),
         fillColor: Color.WHITE,
         style: LabelStyle.FILL,
         showBackground: true,

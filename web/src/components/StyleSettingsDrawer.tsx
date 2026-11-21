@@ -103,7 +103,7 @@ function LinePreview({ lineStyle, color, width }: { lineStyle: MeasureLineStyle;
   );
 }
 
-/** 設定 → 樣式：量測、繪圖圖形的顏色、線條樣式等（從右邊彈出的 Drawer） */
+/** 設定 → 量測與繪圖樣式：量測、繪圖圖形的顏色、線條樣式等（從右邊彈出的 Drawer） */
 export function StyleSettingsDrawer({
   open,
   onOpenChange,
@@ -122,7 +122,7 @@ export function StyleSettingsDrawer({
       <DrawerContent>
         <DrawerHeader className="flex-row items-start justify-between">
           <div>
-            <DrawerTitle>樣式</DrawerTitle>
+            <DrawerTitle>量測與繪圖樣式</DrawerTitle>
             <DrawerDescription>2D 量測與繪圖圖形的線條與填色</DrawerDescription>
           </div>
           <DrawerClose asChild>

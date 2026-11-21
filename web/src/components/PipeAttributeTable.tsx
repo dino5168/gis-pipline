@@ -12,7 +12,7 @@ export function PipeAttributeTable({ title, id, props }: Props) {
   const keys = Object.keys(PIPE_LABELS) as (keyof PipeProperties)[];
   return (
     <table className="border-collapse text-xs text-slate-900">
-      <caption className="pb-1.5 text-left text-[13px] font-semibold">{title} #{id}</caption>
+      <caption className="pb-1.5 text-left text-[0.8125rem] font-semibold">{title} #{id}</caption>
       <tbody>
         {keys.map((k) => (
           <tr key={k}>

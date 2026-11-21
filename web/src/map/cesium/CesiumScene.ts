@@ -54,6 +54,7 @@ import type { HeightMode } from '../../types/pipe3d';
 import type { MeasurePoint3D } from '../../types/measure3d';
 import { MeasureTool3D, type MeasureTool3DOptions } from './measureTool3d';
 import { SEARCH_MARKER_COLOR } from '../../config';
+import { uiCanvasFont } from '../../lib/theme';
 
 /** 管徑缺值時的預設（公尺） */
 const DEFAULT_DIA = 0.2;
@@ -575,7 +576,7 @@ export class CesiumScene {
         },
         label: {
           text: p.label,
-          font: '14px sans-serif',
+          font: uiCanvasFont(14),
           style: LabelStyle.FILL_AND_OUTLINE,
           fillColor: Color.WHITE,
           outlineColor: Color.BLACK,

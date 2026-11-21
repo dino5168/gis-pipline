@@ -151,7 +151,7 @@ export function ScaleBar({
         </div>
       )}
       {attribution && (
-        <span className="pointer-events-auto rounded bg-white/70 px-1 text-[10px] leading-4 whitespace-nowrap text-neutral-700">
+        <span className="pointer-events-auto rounded bg-white/70 px-1 text-[0.625rem] leading-4 whitespace-nowrap text-neutral-700">
           {attribution}
         </span>
       )}
