@@ -313,7 +313,8 @@ export function MapView({
     // ---- 點選：屬性視窗內容由 React 透過 portal 繪製
     let selected: FeatureIdentifier | null = null;
     let detailAbort: AbortController | null = null;
-    const popup = new maplibregl.Popup({ maxWidth: '340px' }).setDOMContent(popupNode);
+    // 屬性表分 2 排，視窗放寬
+    const popup = new maplibregl.Popup({ maxWidth: '36rem' }).setDOMContent(popupNode);
     popup.on('close', () => {
       detailAbort?.abort();
       detailAbort = null;
