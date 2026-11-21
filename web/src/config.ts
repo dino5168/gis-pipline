@@ -25,3 +25,15 @@ export const CESIUM_BASE_URL = `${import.meta.env.BASE_URL}cesium/`;
 export const GROUND_OPACITY_DEFAULT = 0.5;
 /** 2D 地圖最大傾斜角（與 3D 同步時用） */
 export const MAP_MAX_PITCH = 85;
+
+// ---- 門牌搜尋（/api/geocode）
+/** 搜尋框輸入停止多久後才查詢（毫秒） */
+export const GEOCODE_DEBOUNCE_MS = 200;
+/** 下拉清單最多列幾筆 */
+export const GEOCODE_LIMIT = 10;
+/** 定位到門牌時的 2D 縮放等級（已經更近就不拉遠） */
+export const GEOCODE_DOOR_ZOOM = 19;
+/** 定位到路段時最多放大到此等級（路段只有一個門牌時範圍是一個點） */
+export const GEOCODE_ROAD_MAX_ZOOM = 18;
+/** 搜尋結果標記顏色（2D／3D 共用，與管線、量測、繪圖的顏色區隔） */
+export const SEARCH_MARKER_COLOR = '#f59f00';

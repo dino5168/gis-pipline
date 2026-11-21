@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg import sql
 
 from .db import pool
+from .routers import geocode
 
 
 @asynccontextmanager
@@ -26,6 +27,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="台北市公共管線 API", lifespan=lifespan)
+app.include_router(geocode.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

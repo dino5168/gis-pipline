@@ -26,6 +26,9 @@ import { parseDrawStyle } from './types/draw';
 import { parseCoordDisplay } from './types/coordSystem';
 import { parseScaleBar } from './types/scaleBar';
 import { readStored, usePersistentState, writeStored } from './lib/storage';
+import { AddressSearch } from './components/AddressSearch';
+import { flyToSearchResult, setSearchMarker } from './map/searchMarker';
+import type { GeocodeResult } from './types/geocode';
 
 // 版面偏好（只存在這台瀏覽器；讀寫失敗時用預設值）
 const LAYOUT_STORE_KEY = 'utl.layout';
@@ -97,8 +100,10 @@ export default function App() {
   useEffect(() => {
     if (mode !== 'split') activeRef.current = mode;
   }, [mode]);
+  // 程式帶動 2D 飛行（門牌定位）期間鎖住操作方，避免滑鼠剛好移到 3D 上方就改由 3D 帶動、3D 不再跟著飛
+  const flyingRef = useRef(false);
   const activate = useCallback((pane: ActivePane) => {
-    activeRef.current = pane;
+    if (!flyingRef.current) activeRef.current = pane;
   }, []);
   useViewSync(mapRef, scene, activeRef);
 
@@ -114,6 +119,27 @@ export default function App() {
     const inside = c.lng >= w && c.lng <= e && c.lat >= s && c.lat <= n;
     map.flyTo({ center: inside ? c : PIPES_CENTER, zoom: Math.max(zoom, map.getZoom()) });
   }, []);
+
+  // ---- 門牌搜尋：2D 飛過去（3D 由視角同步跟著），兩邊都標記
+  const [searchResult, setSearchResult] = useState<GeocodeResult | null>(null);
+  const locate = useCallback((r: GeocodeResult) => {
+    setSearchResult(r);
+    const map = mapRef.current;
+    if (!map) return;
+    activeRef.current = '2d';
+    flyingRef.current = true;
+    map.once('moveend', () => {
+      flyingRef.current = false;
+    });
+    flyToSearchResult(map, r);
+  }, []);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map) setSearchMarker(map, searchResult);
+  }, [searchResult]);
+  useEffect(() => {
+    scene?.setSearchMarker(searchResult);
+  }, [scene, searchResult]);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -139,6 +165,7 @@ export default function App() {
         onOpenStyleSettings={() => setStyleSettingsOpen(true)}
         commandLine2d={commandLine2d}
         onCommandLine2dChange={setCommandLine2d}
+        search={<AddressSearch onSelect={locate} onClear={() => setSearchResult(null)} />}
       />
       <MaterialFilterDrawer
         open={materialFilterOpen}

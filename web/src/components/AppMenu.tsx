@@ -47,6 +47,8 @@ interface Props {
   /** 視窗 → 2D 命令列 */
   commandLine2d: boolean;
   onCommandLine2dChange: (open: boolean) => void;
+  /** 選單列右側的門牌搜尋框 */
+  search: ReactNode;
 }
 
 /** 頂端選單列（Mega Menu：縮圖方格） */
@@ -64,6 +66,7 @@ export function AppMenu({
   onOpenPipe3DSettings,
   commandLine2d,
   onCommandLine2dChange,
+  search,
   ...layers
 }: Props) {
   return (
@@ -128,7 +131,8 @@ export function AppMenu({
           </MenubarContent>
         </MenubarMenu>
       </Menubar>
-      <span className="text-muted-foreground ml-auto hidden text-xs sm:inline">{VIEW_MODE_LABELS[mode]}</span>
+      <div className="ml-auto">{search}</div>
+      <span className="text-muted-foreground hidden text-xs sm:inline">{VIEW_MODE_LABELS[mode]}</span>
     </header>
   );
 }

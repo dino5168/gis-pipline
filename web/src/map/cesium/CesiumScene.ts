@@ -11,6 +11,7 @@ import {
   ColorGeometryInstanceAttribute,
   CylinderGeometry,
   DirectionalLight,
+  Entity,
   Ellipsoid,
   EllipsoidTerrainProvider,
   GeometryInstance,
@@ -18,6 +19,7 @@ import {
   ImageryLayer,
   IntersectionTests,
   KeyboardEventModifier,
+  LabelStyle,
   Math as CesiumMath,
   Matrix3,
   Matrix4,
@@ -29,6 +31,7 @@ import {
   ScreenSpaceEventType,
   Transforms,
   UrlTemplateImageryProvider,
+  VerticalOrigin,
   Viewer,
   WebMercatorTilingScheme,
   type ImageryLayerCollection,
@@ -50,6 +53,7 @@ import { PIPE_KINDS, type PipeColorMode, type PipeKindId } from '../../types/pip
 import type { HeightMode } from '../../types/pipe3d';
 import type { MeasurePoint3D } from '../../types/measure3d';
 import { MeasureTool3D, type MeasureTool3DOptions } from './measureTool3d';
+import { SEARCH_MARKER_COLOR } from '../../config';
 
 /** 管徑缺值時的預設（公尺） */
 const DEFAULT_DIA = 0.2;
@@ -547,6 +551,38 @@ export class CesiumScene {
     const { camera } = this.viewer;
     const target = this.orbitTarget();
     this.flyAround(target, camera.heading, camera.pitch, Math.max(this.currentRange(target) * factor, 1));
+  }
+
+  private searchMarker: Entity | null = null;
+
+  /** 門牌搜尋結果的標記（null 移除）：地面高度 0 的點＋名稱，不被地面或管線遮住 */
+  setSearchMarker(p: { lng: number; lat: number; label: string } | null) {
+    if (this.searchMarker) this.viewer.entities.remove(this.searchMarker);
+    this.searchMarker = null;
+    if (p) {
+      this.searchMarker = this.viewer.entities.add({
+        position: Cartesian3.fromDegrees(p.lng, p.lat, 0),
+        point: {
+          pixelSize: 14,
+          color: Color.fromCssColorString(SEARCH_MARKER_COLOR),
+          outlineColor: Color.WHITE,
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: p.label,
+          font: '14px sans-serif',
+          style: LabelStyle.FILL_AND_OUTLINE,
+          fillColor: Color.WHITE,
+          outlineColor: Color.BLACK,
+          outlineWidth: 3,
+          verticalOrigin: VerticalOrigin.BOTTOM,
+          pixelOffset: new Cartesian2(0, -14),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    }
+    this.requestRender();
   }
 
   /** 在 container 裡建立立體導覽元件，角度隨主畫面鏡頭同步 */
