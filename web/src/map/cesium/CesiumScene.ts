@@ -45,7 +45,7 @@ import { createHillshadeImagery, createTerrariumSource, createTerrariumTerrain }
 import { MATERIALS, OTHER_CODE, OTHER_MATERIAL } from '../pipeStyle';
 import { NavGizmo, type NavGizmoHandle } from './NavGizmo';
 import { metersPerPixel, zoomFromMetersPerPixel } from '../cameraScale';
-import { MAP_MAX_PITCH, PIPE3D_MAX_DEPTH, PIPE3D_MAX_SPAN, TAIPEI_CENTER } from '../../config';
+import { MAP_MAX_PITCH, PIPE3D_MAX_DEPTH, PIPE3D_MAX_SPAN, PIPE3D_NO_DEPTH_COLOR, TAIPEI_CENTER } from '../../config';
 import type { CameraView } from '../../types/view';
 import type { Bbox } from './loadArea';
 import type { Pipe3D, Pipe3DOptions, SectionMode } from '../../types/pipe3d';
@@ -114,7 +114,10 @@ function closestOnSegmentToRay(ray: Ray, a: Cartesian3, b: Cartesian3): { point:
   return { point, dist: Cartesian3.distance(point, foot) };
 }
 
-const clampDepth = (d: number | null) => Math.min(Math.max(d ?? 0, 0), PIPE3D_MAX_DEPTH);
+/** 埋深有值（> 0）；沒有或 ≤ 0 視為缺值 */
+const hasDepth = (d: number | null): d is number => d != null && d > 0;
+const clampDepth = (d: number) => Math.min(d, PIPE3D_MAX_DEPTH);
+const NO_DEPTH_COLOR = Color.fromCssColorString(PIPE3D_NO_DEPTH_COLOR);
 /** 不允許地面下時，指北針旋轉的最低仰角（度）：鏡頭至少比環繞中心高這個角度 */
 const ORBIT_MIN_ELEVATION_DEG = 5;
 /** 按鈕（放大／縮小／重設／轉正北／俯視）平滑飛行的時間（ms） */
@@ -326,7 +329,7 @@ export class CesiumScene {
     this.applyExaggeration();
   }
 
-  /** 地形垂直放大倍率（只影響地形，管線用自己的倍率） */
+  /** 地形垂直放大倍率（埋深模式只影響地形；Z 值模式管線高度也用這個倍率，與地形對齊） */
   setTerrainExaggeration(k: number) {
     this.terrainExaggeration = k;
     this.applyExaggeration();
@@ -334,6 +337,7 @@ export class CesiumScene {
 
   private applyExaggeration() {
     this.viewer.scene.verticalExaggeration = this.terrain === 'none' ? 1 : this.terrainExaggeration;
+    if (this.options.heightMode === 'z') this.markAllDirty();
     this.notifyHeightSettings(false);
     this.requestRender();
   }
@@ -646,6 +650,14 @@ export class CesiumScene {
   }
 
   /**
+   * 管線高度（位置）的畫面比例：Z 值模式與地形同一個倍率（兩者才對得上），埋深模式用管線放大倍率。
+   * 管徑一律用管線放大倍率。
+   */
+  private get pipeHeightScale(): number {
+    return this.options.heightMode === 'z' ? this.terrainScale : this.options.exaggeration;
+  }
+
+  /**
    * 量測取點：點到管線取管線表面上的點（取不到深度時改取中心線上最接近的點），否則取地面。
    * 高度換算成實際尺寸：管線 ÷ 管線放大倍率；地面在埋深模式為 0、Z 模式為地形高度 ÷ 地形倍率。
    */
@@ -682,7 +694,7 @@ export class CesiumScene {
       return {
         lng: CesiumMath.toDegrees(c.longitude),
         lat: CesiumMath.toDegrees(c.latitude),
-        h: c.height / this.options.exaggeration,
+        h: c.height / this.pipeHeightScale,
         on: 'pipe',
         pipe: { layer: obj.id.layer, gid: obj.id.gid },
       };
@@ -708,7 +720,7 @@ export class CesiumScene {
 
   /** 量測點在畫面上的位置（實際高度乘回目前的放大倍率） */
   measureScenePosition(p: MeasurePoint3D): Cartesian3 {
-    const scale = p.on === 'pipe' ? this.options.exaggeration : this.terrainScale;
+    const scale = p.on === 'pipe' ? this.pipeHeightScale : this.terrainScale;
     return Cartesian3.fromDegrees(p.lng, p.lat, p.h * scale);
   }
 
@@ -848,6 +860,7 @@ export class CesiumScene {
 
   private buildInstances(kind: PipeKindId, pipes: Pipe3D[]): GeometryInstance[] {
     const { heightMode, section: sectionMode, exaggeration: k } = this.options;
+    const vk = this.pipeHeightScale;
     const instances: GeometryInstance[] = [];
     const axes = new Map<number, PipeAxis>();
     this.pipeAxes.set(kind, axes);
@@ -857,7 +870,10 @@ export class CesiumScene {
       if (n < 2 || !this.materialShown(p.mat)) continue;
       const sec = sectionOf(p);
       const half = halfHeight(sec, sectionMode);
-      const color = ColorGeometryInstanceAttribute.fromColor(this.pipeColor(kind, p.mat));
+      // 埋深缺值：缺一端用另一端；兩端都缺當作管頂貼地面。埋深模式下改用 NO_DEPTH_COLOR 標示
+      const sdOk = hasDepth(p.sd), edOk = hasDepth(p.ed);
+      const noDepth = heightMode !== 'z' && !(sdOk && edOk);
+      const color = ColorGeometryInstanceAttribute.fromColor(noDepth ? NO_DEPTH_COLOR : this.pipeColor(kind, p.mat));
       const id: PipePickId = { layer: kind, gid: p.gid };
 
       // 沿線累積水平長度（埋深由起點內插到終點）
@@ -865,15 +881,17 @@ export class CesiumScene {
       const acc = [0];
       for (let j = 1; j < n; j++) acc.push(acc[j - 1] + Cartesian3.distance(ground[j - 1], ground[j]));
       const total = acc[n - 1] || 1;
-      const sd = clampDepth(p.sd), ed = clampDepth(p.ed);
+      const sd = sdOk ? clampDepth(p.sd!) : edOk ? clampDepth(p.ed!) : 0;
+      const ed = edOk ? clampDepth(p.ed!) : sd;
+      const toTop = heightMode === 'depth-top' || (!sdOk && !edOk);
 
-      // 管中心高度（公尺，地表 = 0）
+      // 管中心高度（公尺；埋深模式地表 = 0，Z 值模式為絕對高程）
       const centerZ = (j: number) => {
         if (heightMode === 'z') return p.coords[j][2];
         const d = sd + (ed - sd) * (acc[j] / total);
-        return heightMode === 'depth-top' ? -(d + half) : -d;
+        return toTop ? -(d + half) : -d;
       };
-      const pos = p.coords.map(([lng, lat], j) => Cartesian3.fromDegrees(lng, lat, centerZ(j) * k));
+      const pos = p.coords.map(([lng, lat], j) => Cartesian3.fromDegrees(lng, lat, centerZ(j) * vk));
       axes.set(p.gid, { pts: pos, tol: (Math.hypot(sec.w, sec.h) / 2) * k * 1.2 + 0.05 });
 
       for (let j = 0; j < n - 1; j++) {

@@ -16,6 +16,8 @@ export const PIPE3D_MIN_ZOOM = 17;
 export const PIPE3D_LIMIT = 5000;
 /** 3D 管線：埋深超過此值視為異常資料，以此值顯示（約 235 筆 > 30m） */
 export const PIPE3D_MAX_DEPTH = 30;
+/** 3D 管線：埋深缺值（沒有或 ≤ 0）的管線改用這個顏色（埋深模式） */
+export const PIPE3D_NO_DEPTH_COLOR = '#a9e34b';
 /** 3D 管線：與 API 的 PIPES3D_MAX_SPAN 一致（度），載入範圍以畫面中心為準限制在此跨度內 */
 export const PIPE3D_MAX_SPAN = 0.1;
 

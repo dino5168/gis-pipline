@@ -7,6 +7,7 @@ import {
   type SectionMode,
 } from '../types/pipe3d';
 import type { TerrainId } from '../map/terrain';
+import { PIPE3D_NO_DEPTH_COLOR } from '../config';
 import { WARNING_ALERT } from './PanelSection';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Pipe3DStatusLine } from './MapStatus';
@@ -78,12 +79,24 @@ export function Pipe3DSettingsDrawer(p: Props) {
               </SelectTrigger>
               <SelectContent position="popper">
                 {(Object.keys(HEIGHT_MODE_LABELS) as HeightMode[]).map((m) => (
-                  <SelectItem key={m} value={m}>
+                  <SelectItem key={m} value={m} disabled={m === 'z' && p.terrain === 'none'}>
                     {HEIGHT_MODE_LABELS[m]}
+                    {m === 'z' && p.terrain === 'none' && '（需先開啟地形）'}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {p.terrain === 'none' && (
+              <p className="text-muted-foreground text-xs">
+                Z 值是海拔高度，要有地形當地面才對得上；請先在「圖層 → 地形」開啟地形。
+              </p>
+            )}
+            {p.heightMode !== 'z' && (
+              <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                <span className="inline-block size-3 shrink-0 rounded-sm" style={{ background: PIPE3D_NO_DEPTH_COLOR }} />
+                埋深缺值的管線（管頂貼地面顯示；只缺一端時用另一端的埋深）
+              </p>
+            )}
             {p.terrain !== 'none' && p.heightMode !== 'z' && (
               <Alert className={WARNING_ALERT}>
                 <AlertDescription className="text-inherit">
@@ -111,12 +124,16 @@ export function Pipe3DSettingsDrawer(p: Props) {
             </p>
           </div>
           <div className="space-y-2">
-            <Label className={SECTION_LABEL}>管線垂直／管徑放大 ×{p.exaggeration}</Label>
+            <Label className={SECTION_LABEL}>
+              {p.heightMode === 'z' ? '管徑放大' : '管線垂直／管徑放大'} ×{p.exaggeration}
+            </Label>
             <Slider min={1} max={20} step={1} value={[p.exaggeration]} onValueChange={([v]) => p.onExaggerationChange(v)} />
           </div>
           {p.terrain !== 'none' && (
             <div className="space-y-2">
-              <Label className={SECTION_LABEL}>地形垂直放大 ×{p.terrainExaggeration}</Label>
+              <Label className={SECTION_LABEL}>
+                {p.heightMode === 'z' ? '地形與管線高度垂直放大' : '地形垂直放大'} ×{p.terrainExaggeration}
+              </Label>
               <Slider
                 min={1}
                 max={5}
@@ -124,12 +141,8 @@ export function Pipe3DSettingsDrawer(p: Props) {
                 value={[p.terrainExaggeration]}
                 onValueChange={([v]) => p.onTerrainExaggerationChange(v)}
               />
-              {p.heightMode === 'z' && p.terrainExaggeration !== p.exaggeration && (
-                <Alert className={WARNING_ALERT}>
-                  <AlertDescription className="text-inherit">
-                    Z 值模式下，管線與地形的放大倍率不同時，兩者的相對高度會偏移；要對照位置請把兩個倍率設成一樣。
-                  </AlertDescription>
-                </Alert>
+              {p.heightMode === 'z' && (
+                <p className="text-muted-foreground text-xs">Z 值模式下管線高度與地形用同一個倍率，兩者才對得上。</p>
               )}
             </div>
           )}

@@ -84,6 +84,11 @@ export default function App() {
     (open: boolean) => setWindows((w) => ({ ...w, commandLine2d: open })),
     [setWindows],
   );
+  // Z 值（絕對高程）需要地形當地面才有意義：關掉地形時改回埋深（量到管頂）
+  const changeTerrain = useCallback((t: TerrainId) => {
+    setTerrain(t);
+    if (t === 'none') setHeightMode((m) => (m === 'z' ? 'depth-top' : m));
+  }, []);
   const pipe3dOptions = useMemo(() => ({ heightMode, section, exaggeration }), [heightMode, section, exaggeration]);
 
   // ---- 3D：第一次切到含 3D 的模式才建立 Cesium，之後保留
@@ -153,7 +158,7 @@ export default function App() {
         overlayOpacity={overlayOpacity}
         onOverlayOpacityChange={setOverlayOpacity}
         terrain={terrain}
-        onTerrainChange={setTerrain}
+        onTerrainChange={changeTerrain}
         enabledKinds={enabledKinds}
         onKindsChange={setEnabledKinds}
         colorMode={colorMode}
