@@ -70,7 +70,7 @@ export function AppMenu({
   ...layers
 }: Props) {
   return (
-    <header className="bg-background flex h-11 shrink-0 items-center gap-3 border-b px-3">
+    <header className="bg-background relative flex h-11 shrink-0 items-center gap-3 border-b px-3">
       <h1 className="text-sm font-semibold whitespace-nowrap">台北市公共管線</h1>
       <Menubar className="border-none shadow-none">
         <MenubarMenu>
@@ -131,8 +131,8 @@ export function AppMenu({
           </MenubarContent>
         </MenubarMenu>
       </Menubar>
-      <div className="ml-auto">{search}</div>
-      <span className="text-muted-foreground hidden text-xs sm:inline">{VIEW_MODE_LABELS[mode]}</span>
+      <div className="absolute top-1/2 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2">{search}</div>
+      <span className="text-muted-foreground ml-auto hidden text-xs sm:inline">{VIEW_MODE_LABELS[mode]}</span>
     </header>
   );
 }
