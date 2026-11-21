@@ -79,6 +79,8 @@ interface Props {
   onCommandLineClose: () => void;
   /** 分析 → 剖面分析 */
   profileOpen: boolean;
+  /** 開啟剖面分析視窗（命令列 PROFILE 用） */
+  onProfileOpen: () => void;
   onProfileClose: () => void;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
@@ -178,6 +180,7 @@ export function MapView({
   commandLineOpen,
   onCommandLineClose,
   profileOpen,
+  onProfileOpen,
   onProfileClose,
   mapRef,
   onZoomChange,
@@ -245,6 +248,22 @@ export function MapView({
   };
   const startProfileDrawingRef = useRef(startProfileDrawing);
   startProfileDrawingRef.current = startProfileDrawing;
+  /** 命令列 PROFILE 給的剖面線：視窗已開就直接套用，否則等視窗開啟時套用（取代滑鼠畫線） */
+  const pendingProfileLine = useRef<[LngLat, LngLat] | null>(null);
+  const applyProfileLine = (line: [LngLat, LngLat]) => {
+    profileRef.current?.setLine(line);
+    setProfileLine(line);
+    setProfileDrawing(false);
+  };
+  const profileFromCommand = (line: [LngLat, LngLat]) => {
+    if (profileOpen) applyProfileLine(line);
+    else {
+      pendingProfileLine.current = line;
+      onProfileOpen();
+    }
+  };
+  const profileFromCommandRef = useRef(profileFromCommand);
+  profileFromCommandRef.current = profileFromCommand;
 
   // 用 ref 保存最新的 callback，避免地圖重建
   const cb = useRef({ onZoomChange, onTileError });
@@ -308,6 +327,7 @@ export function MapView({
     const cmd = new CommandLineEngine(map, {
       onChange: setCmdState,
       onHelp: (topic) => setCmdHelp({ open: true, topic }),
+      onProfile: (line) => profileFromCommandRef.current(line),
       onStart: () => {
         closeMeasureRef.current();
         closeDrawRef.current();
@@ -417,8 +437,12 @@ export function MapView({
   }, [commandLineOpen]);
   // ---- 剖面分析：開啟時直接開始畫線，關閉時清除
   useEffect(() => {
-    if (profileOpen) startProfileDrawingRef.current();
-    else {
+    if (profileOpen) {
+      const line = pendingProfileLine.current;
+      pendingProfileLine.current = null;
+      if (line) applyProfileLine(line);
+      else startProfileDrawingRef.current();
+    } else {
       profileRef.current?.clear();
       setProfileLine(null);
       setProfileDrawing(false);

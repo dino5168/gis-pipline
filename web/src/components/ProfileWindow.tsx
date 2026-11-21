@@ -122,7 +122,7 @@ export function ProfileWindow({ line, drawing, enabledKinds, onRedraw, onClose, 
   const usedKinds = result ? PIPE_KINDS.filter((k) => result.pipes.some((p) => p.layer === k.id)) : [];
 
   let status: string;
-  if (drawing) status = line ? '' : '在 2D 圖台依序點選剖面線起點 A、終點 B（Esc 取消）';
+  if (drawing) status = line ? '' : '在 2D 圖台依序點選剖面線起點 A、終點 B（Esc 取消）；要輸入坐標請用命令列 PA';
   else if (!line) status = '按「重畫剖面線」開始';
   else if (!layers.length) status = '沒有開啟的管線種類（選單「管線」）';
   else if (load.kind === 'loading') status = '查詢中…';

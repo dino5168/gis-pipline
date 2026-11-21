@@ -88,6 +88,13 @@ export class ProfileTool {
     this.render();
   }
 
+  /** 直接設定剖面線（命令列 PROFILE 輸入的 A、B） */
+  setLine(line: [LngLat, LngLat]): void {
+    this.clear();
+    this.line = line;
+    this.render();
+  }
+
   setPoints(points: ProfileMapPoint[]): void {
     this.points = points;
     this.highlight = null;
