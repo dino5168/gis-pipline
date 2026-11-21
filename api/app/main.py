@@ -21,7 +21,7 @@ from . import pipes3d_tiles
 from .db import pool
 from .pipes3d_tiles import PIPE_COLUMNS, PIPE_JSON
 from .layers import PIPE_LAYERS
-from .routers import geocode, profile
+from .routers import clash, geocode, profile
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="台北市公共管線 API", lifespan=lifespan)
 app.include_router(geocode.router)
 app.include_router(profile.router)
+app.include_router(clash.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

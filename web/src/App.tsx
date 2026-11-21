@@ -90,7 +90,15 @@ export default function App() {
   const openProfile = () => {
     // 剖面線畫在 2D 圖台：只有 3D 時切到並排
     if (mode === '3d') setMode('split');
+    setClashOpen(false);
     setProfileOpen(true);
+  };
+  // 分析 → 衝突檢核（不記住；與剖面分析同時只開一個，都在 2D 圖台畫線）
+  const [clashOpen, setClashOpen] = useState(false);
+  const openClash = () => {
+    if (mode === '3d') setMode('split');
+    setProfileOpen(false);
+    setClashOpen(true);
   };
   useEffect(() => applySystemStyle(systemStyle), [systemStyle]);
   const commandLine2d = windows.commandLine2d;
@@ -186,6 +194,7 @@ export default function App() {
         commandLine2d={commandLine2d}
         onCommandLine2dChange={setCommandLine2d}
         onOpenProfile={openProfile}
+        onOpenClash={openClash}
         search={<AddressSearch onSelect={locate} onClear={() => setSearchResult(null)} />}
       />
       <MaterialFilterDrawer
@@ -264,6 +273,8 @@ export default function App() {
               profileOpen={profileOpen}
               onProfileOpen={openProfile}
               onProfileClose={() => setProfileOpen(false)}
+              clashOpen={clashOpen}
+              onClashClose={() => setClashOpen(false)}
               mapRef={mapRef}
               onZoomChange={setZoom}
               onTileError={setTileError}

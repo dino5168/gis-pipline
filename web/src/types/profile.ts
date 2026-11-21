@@ -53,14 +53,14 @@ export interface ProfileShape {
  * 斷面圖形（依 3D 的判斷）：有高度 → 矩形（寬×高是外包絡）；寬高比超過 10 倍視為高度填錯，當圓管；
  * 圓管多條共管時仍畫一個圓（直徑＝單條管徑），條數寫在標註上。
  */
-export function profileShape(p: ProfilePipe): ProfileShape {
+export function profileShape(p: Pick<ProfilePipe, 'w' | 'h'>): ProfileShape {
   const w = p.w && p.w > 0 ? p.w : DEFAULT_DIA;
   if (p.h && p.h > 0 && p.h * 10 >= w && w * 10 >= p.h) return { rect: true, w, h: p.h };
   return { rect: false, w, h: w };
 }
 
 /** 管徑標註：圓管 Ø200mm、矩形 178×86mm（換算成 mm） */
-export function formatSize(p: ProfilePipe): string {
+export function formatSize(p: Pick<ProfilePipe, 'w' | 'h' | 'n'>): string {
   if (!p.w || p.w <= 0) return '管徑—';
   const s = profileShape(p);
   const mm = (m: number) => `${Math.round(m * 1000)}`;

@@ -31,6 +31,10 @@ export const PIPE3D_MAX_SPAN = 0.1;
 
 /** 剖面分析：剖面線長度上限（公尺，與 API PROFILE_MAX_LENGTH 一致） */
 export const PROFILE_MAX_LENGTH = 1000;
+/** 衝突檢核：規劃管線長度上限（公尺，與 API CLASH_MAX_LENGTH 一致） */
+export const CLASH_MAX_LENGTH = 2000;
+/** 衝突檢核：規劃管線頂點上限（與 API CLASH_MAX_POINTS 一致） */
+export const CLASH_MAX_POINTS = 200;
 
 /** Cesium 靜態檔（Workers、Assets…）的位址，由 vite.config.ts 複製到建置輸出的 cesium/ */
 export const CESIUM_BASE_URL = `${import.meta.env.BASE_URL}cesium/`;

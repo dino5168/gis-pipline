@@ -44,6 +44,8 @@ import type { CommandLineState } from '../types/commandLine';
 import type { PipeProperties } from '../types/pipe';
 import { ProfileTool } from './profileTool';
 import { ProfileWindow } from '../components/ProfileWindow';
+import { ClashTool } from './clashTool';
+import { ClashWindow } from '../components/ClashWindow';
 import type { LngLat } from '../types/profile';
 import {
   PIPE_KINDS,
@@ -82,6 +84,9 @@ interface Props {
   /** 開啟剖面分析視窗（命令列 PROFILE 用） */
   onProfileOpen: () => void;
   onProfileClose: () => void;
+  /** 分析 → 衝突檢核 */
+  clashOpen: boolean;
+  onClashClose: () => void;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
@@ -182,6 +187,8 @@ export function MapView({
   profileOpen,
   onProfileOpen,
   onProfileClose,
+  clashOpen,
+  onClashClose,
   mapRef,
   onZoomChange,
   onTileError,
@@ -242,11 +249,33 @@ export function MapView({
     cmdRef.current?.cancel();
     closeMeasureRef.current();
     closeDrawRef.current();
+    stopClashDrawingRef.current();
     setProfileLine(null);
     profileRef.current?.startDrawing();
     setProfileDrawing(true);
   };
   const startProfileDrawingRef = useRef(startProfileDrawing);
+  // ---- 衝突檢核（畫線中與量測、繪圖、命令、剖面互斥）
+  const clashRef = useRef<ClashTool | null>(null);
+  const [clashLine, setClashLine] = useState<LngLat[] | null>(null);
+  const [clashDrawing, setClashDrawing] = useState(false);
+  const stopClashDrawing = () => {
+    clashRef.current?.stopDrawing();
+    setClashDrawing(false);
+  };
+  const stopClashDrawingRef = useRef(stopClashDrawing);
+  stopClashDrawingRef.current = stopClashDrawing;
+  const startClashDrawing = () => {
+    cmdRef.current?.cancel();
+    closeMeasureRef.current();
+    closeDrawRef.current();
+    stopProfileDrawingRef.current();
+    setClashLine(null);
+    clashRef.current?.startDrawing();
+    setClashDrawing(true);
+  };
+  const startClashDrawingRef = useRef(startClashDrawing);
+  startClashDrawingRef.current = startClashDrawing;
   startProfileDrawingRef.current = startProfileDrawing;
   /** 命令列 PROFILE 給的剖面線：視窗已開就直接套用，否則等視窗開啟時套用（取代滑鼠畫線） */
   const pendingProfileLine = useRef<[LngLat, LngLat] | null>(null);
@@ -332,6 +361,7 @@ export function MapView({
         closeMeasureRef.current();
         closeDrawRef.current();
         stopProfileDrawingRef.current();
+        stopClashDrawingRef.current();
       },
       sink: draw,
     });
@@ -345,8 +375,16 @@ export function MapView({
       onCancel: () => setProfileDrawing(false),
     });
     profileRef.current = profile;
+    const clash = new ClashTool(map, {
+      onComplete: (line) => {
+        setClashLine(line);
+        setClashDrawing(false);
+      },
+      onCancel: () => setClashDrawing(false),
+    });
+    clashRef.current = clash;
     /** 量測、繪圖、命令執行或畫剖面線中：暫停管線滑過／點選 */
-    const busy = () => measure.active || draw.active || cmd.active || profile.active;
+    const busy = () => measure.active || draw.active || cmd.active || profile.active || clash.active;
 
     // ---- 滑過
     let hover: FeatureIdentifier | null = null;
@@ -408,6 +446,8 @@ export function MapView({
     return () => {
       profile.destroy();
       profileRef.current = null;
+      clash.destroy();
+      clashRef.current = null;
       cmd.destroy();
       cmdRef.current = null;
       measure.destroy();
@@ -449,6 +489,15 @@ export function MapView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileOpen]);
+  // ---- 衝突檢核：開啟時直接開始畫規劃管線，關閉時清除
+  useEffect(() => {
+    if (clashOpen) startClashDrawingRef.current();
+    else {
+      clashRef.current?.clear();
+      setClashLine(null);
+      setClashDrawing(false);
+    }
+  }, [clashOpen]);
 
   // ---- 底圖切換
   useEffect(
@@ -556,6 +605,7 @@ export function MapView({
             else {
               cmdRef.current?.cancel();
               stopProfileDrawing();
+              stopClashDrawing();
               closeDraw();
               // 展開時預設距離量測
               setMeasureOpen(true);
@@ -573,6 +623,7 @@ export function MapView({
             else {
               cmdRef.current?.cancel();
               stopProfileDrawing();
+              stopClashDrawing();
               closeMeasure();
               setDrawOpen(true);
               drawRef.current?.setOpen(true);
@@ -609,6 +660,21 @@ export function MapView({
           onClose={onProfileClose}
           onPoints={(pts) => profileRef.current?.setPoints(pts)}
           onHover={(i) => profileRef.current?.setHighlight(i)}
+        />
+      )}
+      {clashOpen && (
+        <ClashWindow
+          line={clashLine}
+          drawing={clashDrawing}
+          enabledKinds={enabledKinds}
+          onRedraw={startClashDrawing}
+          onClose={onClashClose}
+          onPoints={(pts) => clashRef.current?.setPoints(pts)}
+          onHover={(i) => clashRef.current?.setHighlight(i)}
+          onLocate={(at) => {
+            const map = mapRef.current;
+            if (map) map.easeTo({ center: at, zoom: Math.max(map.getZoom(), 19) });
+          }}
         />
       )}
       <CommandHelpDrawer
