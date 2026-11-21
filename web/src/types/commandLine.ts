@@ -39,7 +39,7 @@ export type CommandShapeMode = 'point' | 'linestring' | 'polygon' | 'rectangle' 
 /** TWD97 平面坐標轉換（命令列 MOVE、ROTATE、COPY 用） */
 export type XYTransform = (xy: [number, number]) => [number, number];
 
-export type CommandGroup = 'draw' | 'modify' | 'other';
+export type CommandGroup = 'draw' | 'modify' | 'inquiry' | 'other';
 
 export interface CommandInfo {
   name: string;
@@ -57,6 +57,7 @@ export interface CommandInfo {
 export const COMMAND_GROUP_NAMES: Record<CommandGroup, string> = {
   draw: '繪製',
   modify: '修改',
+  inquiry: '查詢',
   other: '其他',
 };
 
@@ -193,6 +194,25 @@ export const COMMANDS: CommandInfo[] = [
     steps: ['已有目前選取時立即刪除', '否則選取物件後按 Enter 刪除'],
     options: [['ALL／R／A／P', '選取階段的選項，同 SELECT']],
     notes: ['可在繪圖面板按「復原」找回'],
+  },
+  {
+    name: 'MEASUREGEOM',
+    aliases: ['MEA'],
+    group: 'inquiry',
+    desc: '幾何量測：距離、半徑、角度、面積（只量不畫，結果寫在命令列並暫時標在地圖上）',
+    steps: [
+      '選擇量測項目（直接按 Enter＝距離）',
+      '依提示點選或輸入點位；量完回到選項提示，可接著量下一項',
+      'Enter（量過之後）或 X 結束，地圖上的標註隨之清除',
+    ],
+    options: [
+      ['D', '距離：兩點的距離、XY 平面角度（東起逆時針）、方位角（北起順時針）、ΔX、ΔY；第二點時輸入 M＝多點累計，U 復原、Enter 完成'],
+      ['R', '半徑：選取圓，顯示半徑、直徑、周長、面積'],
+      ['A', '角度：選取兩條線（直線、聚合線或多邊形的邊）的夾角；直接按 Enter 改為指定頂點與兩個端點'],
+      ['AR', '面積：點選角點後 Enter 完成；O＝選取多邊形或圓（扣除洞）；A／S＝加入／減去模式，累計總面積'],
+      ['X', '結束'],
+    ],
+    notes: ['距離與面積以 TWD97 平面坐標計算', '只能選繪圖工具的圖形（不含管線）'],
   },
   {
     name: 'HELP',

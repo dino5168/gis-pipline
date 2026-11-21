@@ -11,6 +11,7 @@
 //   COPY（CO）    複製：同 MOVE，可連續複製多份
 //   ROTATE（RO）  旋轉：基準點 → 角度（或參考 R、複製 C）
 //   ERASE（E）    刪除
+// MEASUREGEOM（MEA）幾何量測在 commandMeasure.ts。
 import type { XY } from './commandInput';
 import type { CommandMessage, CommandOption, CommandPrompt, CommandShapeMode, XYTransform } from '../types/commandLine';
 
@@ -50,12 +51,33 @@ export interface SessionContext {
   copy(ids: FeatureId[], fn: XYTransform): FeatureId[];
   /** 刪除圖形，回傳數量 */
   erase(ids: FeatureId[]): number;
+  /** 單擊選取，回傳圖形的平面坐標幾何（量測用） */
+  pickGeometry(xy: XY): ShapeXY | null;
 }
 
-/** 預覽：虛線（點串）與小圓點 */
+/** 圖形的 TWD97 平面坐標幾何（多邊形環首尾相同） */
+export type ShapeXY =
+  | { type: 'Point'; coords: XY }
+  | { type: 'LineString'; coords: XY[] }
+  | { type: 'Polygon'; rings: XY[][] };
+
+/** 預覽上的文字標籤（MEASUREGEOM 量測值） */
+export interface PreviewLabel {
+  at: XY;
+  /** 可用 \n 分行 */
+  text: string;
+  /** center（預設）：置中；left：標在點的右側 */
+  anchor?: 'center' | 'left';
+  /** 量測結果（粗體＋外框） */
+  strong?: boolean;
+}
+
+/** 預覽：虛線（點串）、小圓點，以及半透明填色與文字標籤 */
 export interface Preview {
   lines: XY[][];
   points: XY[];
+  fills?: XY[][];
+  labels?: PreviewLabel[];
 }
 
 const EPS = 1e-6;

@@ -1,5 +1,6 @@
 // 2D 命令列引擎（仿 AutoCAD Command）：解析輸入、執行命令、命令中接管地圖點選取點。
 // 命令本身（LINE、PLINE、POLYGON、RECTANG、CIRCLE、POINT、SELECT、MOVE、COPY、ROTATE、ERASE）在 commandSessions.ts；
+// MEASUREGEOM 在 commandMeasure.ts（量測值標籤用 Marker：地圖樣式沒有 glyphs，不能用 symbol 文字）；
 // HELP（?）不是 Session：開啟右側說明面板，命令執行中也可輸入（不中斷命令）。
 // 選取判斷在 commandSelect.ts；目前選取由引擎保存並醒目顯示（黃色）。
 // 畫出的圖形加到繪圖工具（DrawTool），可在繪圖面板編輯、復原、匯出。
@@ -24,9 +25,12 @@ import {
   RotateSession,
   SelectSession,
   type Preview,
+  type PreviewLabel,
   type SessionContext,
+  type ShapeXY,
   type Step,
 } from './commandSessions';
+import { MeasureGeomSession } from './commandMeasure';
 import { DEFAULT_COORD_DISPLAY, type CoordDisplaySettings } from '../types/coordSystem';
 import {
   COMMAND_ALIASES,
@@ -69,13 +73,17 @@ interface Options {
 const PREVIEW_SOURCE = 'cmd-preview';
 const PREVIEW_LINE = 'cmd-preview-line';
 const PREVIEW_POINT = 'cmd-preview-point';
+const PREVIEW_FILL = 'cmd-preview-fill';
 const PREVIEW_COLOR = '#ffffff';
+const LABEL_CLASS =
+  'pointer-events-none rounded bg-card/90 px-1.5 py-0.5 font-mono text-xs text-foreground tabular-nums shadow-sm whitespace-pre';
+const LABEL_STRONG_CLASS = `${LABEL_CLASS} font-semibold ring-1 ring-primary/60`;
 const SELECTION_SOURCE = 'cmd-selection';
 const SELECTION_LINE = 'cmd-selection-line';
 const SELECTION_POINT = 'cmd-selection-point';
 const SELECTION_COLOR = '#facc15';
-/** 選取與修改命令不清除目前選取；其他命令開始時清除 */
-const SELECTION_COMMANDS = new Set(['SELECT', 'MOVE', 'COPY', 'ROTATE', 'ERASE']);
+/** 選取、修改與量測命令不清除目前選取；其他命令開始時清除 */
+const SELECTION_COMMANDS = new Set(['SELECT', 'MOVE', 'COPY', 'ROTATE', 'ERASE', 'MEASUREGEOM']);
 /** 透明命令：命令執行中也可輸入，不中斷命令 */
 const HELP_KEYS = new Set(['HELP', "'HELP", '?']);
 
@@ -111,6 +119,8 @@ export class CommandLineEngine {
   private cursor: XY | null = null;
   private selection: FeatureId[] = [];
   private prevSelection: FeatureId[] = [];
+  /** 預覽標籤的 Marker（kind＝anchor＋粗體，不同就換新的） */
+  private labels: { marker: maplibregl.Marker; kind: string }[] = [];
   private readonly ctx: SessionContext;
 
   constructor(map: maplibregl.Map, opts: Options) {
@@ -144,6 +154,7 @@ export class CommandLineEngine {
       transform: (ids, fn) => this.opts.sink.transformFeatures(ids, fn),
       copy: (ids, fn) => this.opts.sink.copyFeatures(ids, fn),
       erase: (ids) => this.opts.sink.eraseFeatures(ids),
+      pickGeometry: (xy) => this.pickGeometry(xy),
     };
   }
 
@@ -250,6 +261,8 @@ export class CommandLineEngine {
         return new RotateSession(this.ctx);
       case 'ERASE':
         return new EraseSession(this.ctx);
+      case 'MEASUREGEOM':
+        return new MeasureGeomSession(this.ctx);
       default:
         return new LineSession(this.ctx, this.lastLineEnd);
     }
@@ -322,6 +335,17 @@ export class CommandLineEngine {
     const q = this.map.project([p[0], p[1]]);
     return [q.x, q.y];
   };
+
+  private pickGeometry(xy: XY): ShapeXY | null {
+    const shapes = this.opts.sink.getShapes();
+    const id = pickShape(shapes, this.project, this.project(toLngLat(xy)));
+    const g = id === null ? undefined : shapes.find((s) => s.id === id)?.geometry;
+    if (!g) return null;
+    const xyOf = (p: number[]): XY => lngLatToTwd97(p[0], p[1]);
+    if (g.type === 'Point') return { type: 'Point', coords: xyOf(g.coordinates) };
+    if (g.type === 'LineString') return { type: 'LineString', coords: g.coordinates.map(xyOf) };
+    return { type: 'Polygon', rings: g.coordinates.map((r) => r.map(xyOf)) };
+  }
 
   /** 只留下還存在的圖形 */
   private existing(ids: FeatureId[]): FeatureId[] {
@@ -445,10 +469,19 @@ export class CommandLineEngine {
   // ---- 預覽
   private updatePreview() {
     const map = this.map;
+    const pv = this.session?.preview(this.cursor) ?? null;
+    this.updateLabels(pv?.labels ?? []);
     if (!map.isStyleLoaded()) return;
     if (!map.getSource(PREVIEW_SOURCE)) {
       if (!this.session) return;
       map.addSource(PREVIEW_SOURCE, { type: 'geojson', data: EMPTY });
+      map.addLayer({
+        id: PREVIEW_FILL,
+        type: 'fill',
+        source: PREVIEW_SOURCE,
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'fill-color': PREVIEW_COLOR, 'fill-opacity': 0.15 },
+      });
       map.addLayer({
         id: PREVIEW_LINE,
         type: 'line',
@@ -470,12 +503,18 @@ export class CommandLineEngine {
       });
     }
     const src = map.getSource(PREVIEW_SOURCE) as maplibregl.GeoJSONSource;
-    if (!this.session) {
+    if (!pv) {
       src.setData(EMPTY);
       return;
     }
-    const pv = this.session.preview(this.cursor);
     const features: FeatureCollection['features'] = [
+      ...(pv.fills ?? [])
+        .filter((r) => r.length >= 3)
+        .map((r) => ({
+          type: 'Feature' as const,
+          properties: {},
+          geometry: { type: 'Polygon' as const, coordinates: [[...r, r[0]].map(toLngLat)] },
+        })),
       ...pv.lines
         .filter((l) => l.length >= 2)
         .map((l) => ({
@@ -490,5 +529,31 @@ export class CommandLineEngine {
       })),
     ];
     src.setData({ type: 'FeatureCollection', features });
+  }
+
+  /** 量測值標籤：沿用已建立的 Marker 更新文字與位置（滑鼠移動時不重建），樣式不同才換新的 */
+  private updateLabels(labels: PreviewLabel[]) {
+    const pool = this.labels;
+    labels.forEach((l, i) => {
+      const anchor = l.anchor ?? 'center';
+      const kind = `${anchor}|${l.strong ? 1 : 0}`;
+      let item: (typeof pool)[number] | undefined = pool[i];
+      if (item && item.kind !== kind) {
+        item.marker.remove();
+        item = undefined;
+      }
+      if (!item) {
+        const el = document.createElement('div');
+        el.className = l.strong ? LABEL_STRONG_CLASS : LABEL_CLASS;
+        const marker = new maplibregl.Marker({ element: el, anchor, offset: anchor === 'left' ? [12, 0] : [0, 0] })
+          .setLngLat(toLngLat(l.at))
+          .addTo(this.map);
+        item = { marker, kind };
+        pool[i] = item;
+      } else item.marker.setLngLat(toLngLat(l.at));
+      const el = item.marker.getElement();
+      if (el.textContent !== l.text) el.textContent = l.text;
+    });
+    for (const item of pool.splice(labels.length)) item.marker.remove();
   }
 }
