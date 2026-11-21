@@ -27,6 +27,7 @@ import { parseCoordDisplay } from './types/coordSystem';
 import { parseScaleBar } from './types/scaleBar';
 import { readStored, usePersistentState, writeStored } from './lib/storage';
 import { AddressSearch } from './components/AddressSearch';
+import { TitleTooltip } from './components/TitleTooltip';
 import { flyToSearchResult, setSearchMarker } from './map/searchMarker';
 import type { GeocodeResult } from './types/geocode';
 
@@ -280,6 +281,7 @@ export default function App() {
           onZoomTo={zoomToPipes}
         />
       </div>
+      <TitleTooltip />
     </div>
   );
 }
