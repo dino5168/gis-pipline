@@ -1,0 +1,13 @@
+# Martin 設定：送預先產生的 MBTiles（不查資料庫）
+# 啟動：.\start-martin.ps1（預設模式）；產生檔案：.\build-mbtiles.ps1
+#
+# tiles\mbtiles\ 裡每個 <來源名稱>.mbtiles 都會發布，來源名稱＝檔名＝資料表名稱，
+# 圖磚網址與 martin.yaml（即時模式）相同，例如 http://127.0.0.1:3000/utl_pipe/{z}/{x}/{y}。
+# TileJSON 的 maxzoom 是 18，前端放大到 z19 以上時由 MapLibre 拿 z18 圖磚放大（overzoom）。
+# 資料夾路徑由 start-martin.ps1 放進環境變數 MARTIN_MBTILES_DIR。
+
+listen_addresses: '127.0.0.1:3000'
+
+mbtiles:
+  paths:
+    - ${MARTIN_MBTILES_DIR}

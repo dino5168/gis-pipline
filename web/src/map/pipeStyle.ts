@@ -31,6 +31,8 @@ export const OTHER_CODE = '__other';
 export const OTHER_MATERIAL: Material = { code: OTHER_CODE, color: '#868e96', name: '其他材料' };
 export const ALL_MATERIAL_CODES = [...MATERIALS.map((m) => m.code), OTHER_CODE];
 
+// 注意：預產圖磚 z12～13 只帶 material、dia_width（tiles/build-mbtiles.ps1 的 $LiteProperties）。
+// 畫圖／篩選要用到其他欄位時，兩邊要同步，否則小比例尺會抓不到值。
 const colorExpr: ExpressionSpecification = [
   'match',
   ['get', 'material'],

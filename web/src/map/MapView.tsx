@@ -312,8 +312,11 @@ export function MapView({
 
     // ---- 點選：屬性視窗內容由 React 透過 portal 繪製
     let selected: FeatureIdentifier | null = null;
+    let detailAbort: AbortController | null = null;
     const popup = new maplibregl.Popup({ maxWidth: '340px' }).setDOMContent(popupNode);
     popup.on('close', () => {
+      detailAbort?.abort();
+      detailAbort = null;
       if (selected) map.setFeatureState(selected, { selected: false });
       selected = null;
       setSelection(null);
@@ -326,8 +329,22 @@ export function MapView({
       popup.remove(); // 先關閉舊視窗（觸發 close 清除舊選取），再設定新選取
       selected = featureId({ source: f.source, sourceLayer: f.sourceLayer, id: f.id });
       map.setFeatureState(selected, { selected: true });
-      setSelection({ kind: f.sourceLayer, id: f.id, props: f.properties as Partial<PipeProperties> });
+      const kind = f.sourceLayer;
+      const id = f.id;
+      setSelection({ kind, id, props: f.properties as Partial<PipeProperties> });
       popup.setLngLat(e.lngLat).addTo(map);
+      // 小比例尺（z12～13）預產圖磚只帶畫圖用的欄位，完整屬性向 API 取；取到後覆蓋圖磚屬性
+      const ctrl = new AbortController();
+      detailAbort = ctrl;
+      fetch(`/api/pipes/${encodeURIComponent(String(id))}?layer=${encodeURIComponent(kind)}`, { signal: ctrl.signal })
+        .then((res) => (res.ok ? (res.json() as Promise<{ properties: Partial<PipeProperties> }>) : null))
+        .then((detail) => {
+          if (!detail || ctrl.signal.aborted) return;
+          setSelection((cur) =>
+            cur && cur.kind === kind && cur.id === id ? { ...cur, props: { ...cur.props, ...detail.properties } } : cur,
+          );
+        })
+        .catch(() => {}); // 取消或連線失敗：保留圖磚屬性
     });
 
     return () => {
