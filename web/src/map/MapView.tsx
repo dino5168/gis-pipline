@@ -42,6 +42,9 @@ import { CommandHelpDrawer } from '../components/CommandHelpDrawer';
 import { CommandLineWindow } from '../components/CommandLineWindow';
 import type { CommandLineState } from '../types/commandLine';
 import type { PipeProperties } from '../types/pipe';
+import { ProfileTool } from './profileTool';
+import { ProfileWindow } from '../components/ProfileWindow';
+import type { LngLat } from '../types/profile';
 import {
   PIPE_KINDS,
   PIPE_KIND_BY_ID,
@@ -74,6 +77,9 @@ interface Props {
   /** 視窗 → 2D 命令列 */
   commandLineOpen: boolean;
   onCommandLineClose: () => void;
+  /** 分析 → 剖面分析 */
+  profileOpen: boolean;
+  onProfileClose: () => void;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
@@ -171,6 +177,8 @@ export function MapView({
   coordDisplay,
   commandLineOpen,
   onCommandLineClose,
+  profileOpen,
+  onProfileClose,
   mapRef,
   onZoomChange,
   onTileError,
@@ -217,6 +225,26 @@ export function MapView({
   const [cmdState, setCmdState] = useState<CommandLineState | null>(null);
   /** 命令說明面板（HELP、?、F1）；topic＝要標示的命令 */
   const [cmdHelp, setCmdHelp] = useState<{ open: boolean; topic: string | null }>({ open: false, topic: null });
+  // ---- 剖面分析（畫線中與量測、繪圖、命令互斥）
+  const profileRef = useRef<ProfileTool | null>(null);
+  const [profileLine, setProfileLine] = useState<[LngLat, LngLat] | null>(null);
+  const [profileDrawing, setProfileDrawing] = useState(false);
+  const stopProfileDrawing = () => {
+    profileRef.current?.stopDrawing();
+    setProfileDrawing(false);
+  };
+  const stopProfileDrawingRef = useRef(stopProfileDrawing);
+  stopProfileDrawingRef.current = stopProfileDrawing;
+  const startProfileDrawing = () => {
+    cmdRef.current?.cancel();
+    closeMeasureRef.current();
+    closeDrawRef.current();
+    setProfileLine(null);
+    profileRef.current?.startDrawing();
+    setProfileDrawing(true);
+  };
+  const startProfileDrawingRef = useRef(startProfileDrawing);
+  startProfileDrawingRef.current = startProfileDrawing;
 
   // 用 ref 保存最新的 callback，避免地圖重建
   const cb = useRef({ onZoomChange, onTileError });
@@ -283,13 +311,22 @@ export function MapView({
       onStart: () => {
         closeMeasureRef.current();
         closeDrawRef.current();
+        stopProfileDrawingRef.current();
       },
       sink: draw,
     });
     cmdRef.current = cmd;
     cmd.emit();
-    /** 量測、繪圖或命令執行中：暫停管線滑過／點選 */
-    const busy = () => measure.active || draw.active || cmd.active;
+    const profile = new ProfileTool(map, {
+      onComplete: (line) => {
+        setProfileLine(line);
+        setProfileDrawing(false);
+      },
+      onCancel: () => setProfileDrawing(false),
+    });
+    profileRef.current = profile;
+    /** 量測、繪圖、命令執行或畫剖面線中：暫停管線滑過／點選 */
+    const busy = () => measure.active || draw.active || cmd.active || profile.active;
 
     // ---- 滑過
     let hover: FeatureIdentifier | null = null;
@@ -349,6 +386,8 @@ export function MapView({
     });
 
     return () => {
+      profile.destroy();
+      profileRef.current = null;
       cmd.destroy();
       cmdRef.current = null;
       measure.destroy();
@@ -376,6 +415,16 @@ export function MapView({
   useEffect(() => {
     if (!commandLineOpen) cmdRef.current?.cancel();
   }, [commandLineOpen]);
+  // ---- 剖面分析：開啟時直接開始畫線，關閉時清除
+  useEffect(() => {
+    if (profileOpen) startProfileDrawingRef.current();
+    else {
+      profileRef.current?.clear();
+      setProfileLine(null);
+      setProfileDrawing(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileOpen]);
 
   // ---- 底圖切換
   useEffect(
@@ -482,6 +531,7 @@ export function MapView({
             if (measureOpen) closeMeasure();
             else {
               cmdRef.current?.cancel();
+              stopProfileDrawing();
               closeDraw();
               // 展開時預設距離量測
               setMeasureOpen(true);
@@ -498,6 +548,7 @@ export function MapView({
             if (drawOpen) closeDraw();
             else {
               cmdRef.current?.cancel();
+              stopProfileDrawing();
               closeMeasure();
               setDrawOpen(true);
               drawRef.current?.setOpen(true);
@@ -523,6 +574,17 @@ export function MapView({
           onCancel={() => cmdRef.current?.cancel()}
           onClose={onCommandLineClose}
           onHelp={() => cmdRef.current?.help()}
+        />
+      )}
+      {profileOpen && (
+        <ProfileWindow
+          line={profileLine}
+          drawing={profileDrawing}
+          enabledKinds={enabledKinds}
+          onRedraw={startProfileDrawing}
+          onClose={onProfileClose}
+          onPoints={(pts) => profileRef.current?.setPoints(pts)}
+          onHover={(i) => profileRef.current?.setHighlight(i)}
         />
       )}
       <CommandHelpDrawer

@@ -85,6 +85,8 @@ export default function App() {
   const [windows, setWindows] = usePersistentState('utl.windows', parseWindows);
   const [systemStyle, setSystemStyle] = usePersistentState(SYSTEM_STYLE_KEY, parseSystemStyle);
   const [systemStyleOpen, setSystemStyleOpen] = useState(false);
+  // 分析 → 剖面分析（不記住，每次重開都重新畫剖面線）
+  const [profileOpen, setProfileOpen] = useState(false);
   useEffect(() => applySystemStyle(systemStyle), [systemStyle]);
   const commandLine2d = windows.commandLine2d;
   const setCommandLine2d = useCallback(
@@ -178,6 +180,11 @@ export default function App() {
         onOpenSystemStyle={() => setSystemStyleOpen(true)}
         commandLine2d={commandLine2d}
         onCommandLine2dChange={setCommandLine2d}
+        onOpenProfile={() => {
+          // 剖面線畫在 2D 圖台：只有 3D 時切到並排
+          if (mode === '3d') setMode('split');
+          setProfileOpen(true);
+        }}
         search={<AddressSearch onSelect={locate} onClear={() => setSearchResult(null)} />}
       />
       <MaterialFilterDrawer
@@ -253,6 +260,8 @@ export default function App() {
               coordDisplay={coordDisplay}
               commandLineOpen={commandLine2d}
               onCommandLineClose={() => setCommandLine2d(false)}
+              profileOpen={profileOpen}
+              onProfileClose={() => setProfileOpen(false)}
               mapRef={mapRef}
               onZoomChange={setZoom}
               onTileError={setTileError}

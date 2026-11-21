@@ -1,4 +1,4 @@
-import { Box, Columns2, Crosshair, Map as MapIcon, Monitor, Palette, Ruler, SquareTerminal } from 'lucide-react';
+import { Box, ChartSpline, Columns2, Crosshair, Map as MapIcon, Monitor, Palette, Ruler, SquareTerminal } from 'lucide-react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { VIEW_MODE_LABELS, type ViewMode } from '../types/view';
@@ -48,6 +48,8 @@ interface Props {
   /** 視窗 → 2D 命令列 */
   commandLine2d: boolean;
   onCommandLine2dChange: (open: boolean) => void;
+  /** 分析 → 剖面分析 */
+  onOpenProfile: () => void;
   /** 選單列右側的門牌搜尋框 */
   search: ReactNode;
 }
@@ -68,6 +70,7 @@ export function AppMenu({
   onOpenPipe3DSettings,
   commandLine2d,
   onCommandLine2dChange,
+  onOpenProfile,
   search,
   ...layers
 }: Props) {
@@ -102,6 +105,15 @@ export function AppMenu({
           onOpenMaterialFilter={onOpenMaterialFilter}
           onOpenPipe3DSettings={onOpenPipe3DSettings}
         />
+        <MenubarMenu>
+          <MenubarTrigger>分析</MenubarTrigger>
+          <MenubarContent>
+            <MenubarItem onSelect={onOpenProfile}>
+              <ChartSpline />
+              剖面分析
+            </MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
         <MenubarMenu>
           <MenubarTrigger>視窗</MenubarTrigger>
           <MenubarContent>

@@ -20,7 +20,8 @@ from psycopg import sql
 from . import pipes3d_tiles
 from .db import pool
 from .pipes3d_tiles import PIPE_COLUMNS, PIPE_JSON
-from .routers import geocode
+from .layers import PIPE_LAYERS
+from .routers import geocode, profile
 
 
 @asynccontextmanager
@@ -32,6 +33,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="台北市公共管線 API", lifespan=lifespan)
 app.include_router(geocode.router)
+app.include_router(profile.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -47,15 +49,6 @@ def health() -> dict:
     return {"status": "ok", **row}
 
 
-# 可查詢的管線資料表（一種管線一張表，名稱與 Martin 圖磚 source 相同）。只接受這裡列出的名稱。
-PIPE_LAYERS = {
-    "utl_pipe": "污水下水道管線（類別碼 8040101）",
-    "utl_tel_pipe": "一般電信系統管線（類別碼 8010101）",
-    "utl_cable_duct": "纜線管路（綜合管線，類別碼 8080401）",
-    "utl_catv_pipe": "有線電視系統管線（電信，類別碼 8010401）",
-    "utl_police_pipe": "警訊系統管線（電信，類別碼 8010301）",
-    "utl_tel06_pipe": "電信小類 06 管線（類別碼 8010601，小類名稱待確認）",
-}
 LayerParam = Query("utl_pipe", description="管線資料表：" + "、".join(PIPE_LAYERS))
 
 

@@ -29,6 +29,9 @@ export const PIPE3D_NO_DEPTH_COLOR = '#a9e34b';
 /** 3D 管線：與 API 的 PIPES3D_MAX_SPAN 一致（度），載入範圍以畫面中心為準限制在此跨度內 */
 export const PIPE3D_MAX_SPAN = 0.1;
 
+/** 剖面分析：剖面線長度上限（公尺，與 API PROFILE_MAX_LENGTH 一致） */
+export const PROFILE_MAX_LENGTH = 1000;
+
 /** Cesium 靜態檔（Workers、Assets…）的位址，由 vite.config.ts 複製到建置輸出的 cesium/ */
 export const CESIUM_BASE_URL = `${import.meta.env.BASE_URL}cesium/`;
 /** 3D 地面預設不透明度（0～1，小於 1 才看得到地面下的管線） */

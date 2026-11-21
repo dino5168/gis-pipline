@@ -12,17 +12,19 @@ export interface PipeKind {
   color: string;
   /** 2D 圖磚最小縮放等級，須與 martin.yaml 的 minzoom 一致 */
   minZoom: number;
+  /** 剖面圖標註用的管線種類代碼（例：污水 S、電信 T） */
+  code: string;
 }
 
 /** 順序即選單順序；2D 後面的畫在上面 */
 export const PIPE_KINDS = [
-  { id: 'utl_pipe', name: '污水下水道管線', classCode: '8040101', color: '#2f9e44', minZoom: 12 },
-  { id: 'utl_tel_pipe', name: '電信管線', classCode: '8010101', color: '#f08c00', minZoom: 15 },
-  { id: 'utl_cable_duct', name: '纜線管路', classCode: '8080401', color: '#ae3ec9', minZoom: 12 },
-  { id: 'utl_catv_pipe', name: '有線電視管線', classCode: '8010401', color: '#1c7ed6', minZoom: 12 },
-  { id: 'utl_police_pipe', name: '警訊管線', classCode: '8010301', color: '#e03131', minZoom: 12 },
+  { id: 'utl_pipe', name: '污水下水道管線', classCode: '8040101', color: '#2f9e44', minZoom: 12, code: 'S' },
+  { id: 'utl_tel_pipe', name: '電信管線', classCode: '8010101', color: '#f08c00', minZoom: 15, code: 'T' },
+  { id: 'utl_cable_duct', name: '纜線管路', classCode: '8080401', color: '#ae3ec9', minZoom: 12, code: 'C' },
+  { id: 'utl_catv_pipe', name: '有線電視管線', classCode: '8010401', color: '#1c7ed6', minZoom: 12, code: 'V' },
+  { id: 'utl_police_pipe', name: '警訊管線', classCode: '8010301', color: '#e03131', minZoom: 12, code: 'P' },
   // 8010601：電信小類 06，交換資料標準表 11 未列，名稱待確認
-  { id: 'utl_tel06_pipe', name: '電信管線（小類 06）', classCode: '8010601', color: '#15aabf', minZoom: 12 },
+  { id: 'utl_tel06_pipe', name: '電信管線（小類 06）', classCode: '8010601', color: '#15aabf', minZoom: 12, code: 'T6' },
 ] as const satisfies readonly PipeKind[];
 
 export type PipeKindId = (typeof PIPE_KINDS)[number]['id'];
