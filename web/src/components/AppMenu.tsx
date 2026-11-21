@@ -131,7 +131,7 @@ export function AppMenu({
           </MenubarContent>
         </MenubarMenu>
       </Menubar>
-      <div className="absolute top-1/2 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2">{search}</div>
+      <div className="absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2">{search}</div>
       <span className="text-muted-foreground ml-auto hidden text-xs sm:inline">{VIEW_MODE_LABELS[mode]}</span>
     </header>
   );
