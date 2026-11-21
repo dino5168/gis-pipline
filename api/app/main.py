@@ -11,11 +11,15 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, Response
+import gzip
+
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg import sql
 
+from . import pipes3d_tiles
 from .db import pool
+from .pipes3d_tiles import PIPE_COLUMNS, PIPE_JSON
 from .routers import geocode
 
 
@@ -82,11 +86,6 @@ def pipe_detail(gid: int, layer: str = LayerParam) -> dict:
     return {"type": "Feature", "id": gid, "properties": row["props"], "geometry": json.loads(row["geometry"])}
 
 
-# 管徑換算成公尺：size_unit 0=mm、1=英吋、2=cm、3=m（依資料分布推定：0 中位數 200、1 為 1~12、2 為 10~30、3 為 0.1~0.25）
-_UNIT_M = "CASE size_unit WHEN 1 THEN 0.0254 WHEN 2 THEN 0.01 WHEN 3 THEN 1 ELSE 0.001 END"
-_DIA_M = f"dia_width * {_UNIT_M}"
-# 管徑高度（公尺）：0 或缺值表示圓管（只有寬度）→ null
-_HEIGHT_M = f"CASE WHEN dia_height > 0 THEN dia_height * {_UNIT_M} END"
 PIPES3D_MAX_SPAN = 0.1  # bbox 最大經緯度跨度（約 10km），避免整個城市一次查
 PIPES3D_MAX_LIMIT = 10000
 
@@ -119,9 +118,7 @@ def pipes_3d(
             SELECT ST_Transform(ST_MakeEnvelope(%(w)s, %(s)s, %(e)s, %(n)s, 4326), 3826) AS box,
                    ST_Transform(ST_SetSRID(ST_MakePoint((%(w)s + %(e)s) / 2, (%(s)s + %(n)s) / 2), 4326), 3826) AS c
         ), r AS (
-            SELECT p.gid, p.material AS mat, round(({_DIA_M})::numeric, 4)::float8 AS dia,
-                   round(({_HEIGHT_M})::numeric, 4)::float8 AS h, p.pipe_count AS n,
-                   p.start_dep AS sd, p.end_dep AS ed, p.geom,
+            SELECT {PIPE_COLUMNS},
                    row_number() OVER (ORDER BY p.geom <-> q.c) AS rn
             FROM {{tbl}} p, q
             WHERE p.geom && q.box
@@ -130,13 +127,35 @@ def pipes_3d(
         )
         SELECT json_build_object(
             'truncated', count(*) > %(limit)s,
-            'pipes', coalesce(json_agg(json_build_object(
-                'gid', gid, 'mat', mat, 'dia', dia, 'h', h, 'n', n, 'sd', sd, 'ed', ed,
-                'coords', ST_AsGeoJSON(ST_Transform(geom, 4326), 8)::json -> 'coordinates'
-            ) ORDER BY rn) FILTER (WHERE rn <= %(limit)s), '[]'::json)
+            'pipes', coalesce(json_agg({PIPE_JSON} ORDER BY rn) FILTER (WHERE rn <= %(limit)s), '[]'::json)
         )::text
         FROM r
     """).format(tbl=tbl)
     with pool.connection() as conn:
         body = conn.execute(query, {"w": w, "s": s, "e": e, "n": n, "limit": limit}).fetchone()
     return Response(next(iter(body.values())), media_type="application/json")
+
+
+@app.get("/api/pipes3d/{z}/{x}/{y}")
+def pipes_3d_tile(z: int, x: int, y: int, request: Request, layer: str = LayerParam) -> Response:
+    """3D 管線格網（預先產生）：起點落在 z16 格子 (x, y) 的全部管線，欄位同 /api/pipes3d 的 pipes。
+
+    不查資料庫，讀 tiles/pipes3d/<layer>.sqlite（`uv run python -m app.pipes3d_tiles` 產生）。
+    網址固定、帶 ETag，瀏覽器／Nginx 可快取。
+    """
+    _layer_table(layer)  # 驗證 layer 白名單
+    if z != pipes3d_tiles.TILE_ZOOM:
+        raise HTTPException(422, f"z 只能是 {pipes3d_tiles.TILE_ZOOM}")
+    if not (0 <= x < 2**z and 0 <= y < 2**z):
+        raise HTTPException(422, "x / y 超出範圍")
+    tile = pipes3d_tiles.read_tile(layer, x, y)
+    if tile is None:
+        raise HTTPException(503, f"{layer} 的 3D 格網尚未產生（在 api 資料夾執行 uv run python -m app.pipes3d_tiles）")
+    data, version = tile
+    etag = f'"{version}"'
+    headers = {"ETag": etag, "Cache-Control": "public, max-age=3600", "Vary": "Accept-Encoding"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    if "gzip" in request.headers.get("accept-encoding", ""):
+        return Response(data, media_type="application/json", headers={**headers, "Content-Encoding": "gzip"})
+    return Response(gzip.decompress(data), media_type="application/json", headers=headers)

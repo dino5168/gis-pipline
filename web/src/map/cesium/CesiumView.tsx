@@ -1,13 +1,20 @@
 // 3D 圖台（Cesium）：第一次需要時才動態載入 Cesium，之後保持存在（隱藏時停止繪製）。
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type * as maplibregl from 'maplibre-gl';
-import { CESIUM_BASE_URL, PIPE3D_LIMIT, PIPE3D_MIN_ZOOM } from '../../config';
+import {
+  CESIUM_BASE_URL,
+  PIPE3D_LIMIT,
+  PIPE3D_MIN_ZOOM,
+  PIPE3D_TILE_CACHE,
+  PIPE3D_TILE_CONCURRENCY,
+  PIPE3D_TILE_ZOOM,
+} from '../../config';
 import type { BasemapId } from '../basemaps';
 import type { OverlayId } from '../overlays';
 import type { TerrainId } from '../terrain';
-import type { Pipe3DOptions, Pipe3DStatus, Pipes3DResponse } from '../../types/pipe3d';
+import type { Pipe3D, Pipe3DOptions, Pipe3DStatus, Pipes3DTileResponse } from '../../types/pipe3d';
 import type { CesiumScene } from './CesiumScene';
-import { bboxParam, clampSpan, covers, type LoadedArea } from './loadArea';
+import { tileKey, tilesForView, type TileXY } from './loadArea';
 import { ScaleBar } from '../../components/ScaleBar';
 import { Navigation3D } from '../../components/Navigation3D';
 import { metersPerPixel } from '../cameraScale';
@@ -111,8 +118,10 @@ export function CesiumView(p: Props) {
   useEffect(() => scene?.setKinds(p.enabledKinds), [scene, p.enabledKinds]);
   useEffect(() => scene?.setColorMode(p.colorMode), [scene, p.colorMode]);
 
-  // 各種類已載入的範圍（畫面還在範圍內就不重抓；關閉再打開時也沿用）
-  const loadedArea = useRef(new Map<PipeKindId, LoadedArea>());
+  // 各種類已下載的格子（key = "x/y"；Map 的順序當作最近使用順序，超過上限丟掉最舊的；關閉再打開時也沿用）
+  const tileCache = useRef(new Map<PipeKindId, Map<string, Pipe3D[]>>());
+  // 各種類目前交給 3D 場景的格子組合（相同就不重建模型）與筆數
+  const shownTiles = useRef(new Map<PipeKindId, string>());
   const loadedResult = useRef(new Map<PipeKindId, { count: number; truncated: boolean }>());
 
   // ---- 量測（與 2D 操作一致；3D 隱藏時關閉）
@@ -208,26 +217,58 @@ export function CesiumView(p: Props) {
       const c = map.getCenter();
       const center: [number, number] = [c.lng, c.lat];
       const b = map.getBounds(); // 2D 有旋轉時為外接矩形
-      const bbox = clampSpan([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], center);
-      const todo = kinds.filter((k) => {
-        const area = loadedArea.current.get(k);
-        return !area || !covers(area, bbox, center);
-      });
-      if (todo.length === 0) return status(summary());
-      status({ kind: 'loading', phase: 'fetch' });
-      try {
-        await Promise.all(
-          todo.map(async (k) => {
-            const url = `/api/pipes3d?bbox=${bboxParam(bbox)}&limit=${PIPE3D_LIMIT}&layer=${k}`;
-            const res = await fetch(url, { signal: abort.signal });
-            if (!res.ok) throw new Error(`API 回應 ${res.status}`);
-            const data = (await res.json()) as Pipes3DResponse;
+      const tiles = tilesForView([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], center, PIPE3D_TILE_ZOOM);
+      const cacheOf = (k: PipeKindId) => {
+        let c = tileCache.current.get(k);
+        if (!c) tileCache.current.set(k, (c = new Map()));
+        return c;
+      };
+      const fetchTile = async (k: PipeKindId, t: TileXY) => {
+        const res = await fetch(`/api/pipes3d/${PIPE3D_TILE_ZOOM}/${t.x}/${t.y}?layer=${k}`, { signal: abort.signal });
+        if (!res.ok) throw new Error(`API 回應 ${res.status}`);
+        return ((await res.json()) as Pipes3DTileResponse).pipes;
+      };
+      // 一種管線：格子從畫面中心往外，累計筆數達 PIPE3D_LIMIT 就停（只下載需要的格子）
+      const loadKind = async (k: PipeKindId) => {
+        const cache = cacheOf(k);
+        const chosen: string[] = [];
+        let count = 0;
+        let i = 0;
+        while (i < tiles.length && count < PIPE3D_LIMIT) {
+          const batch = tiles.slice(i, i + PIPE3D_TILE_CONCURRENCY);
+          i += batch.length;
+          const missing = batch.filter((t) => !cache.has(tileKey(t)));
+          if (missing.length) {
+            status({ kind: 'loading', phase: 'fetch' });
+            const got = await Promise.all(missing.map((t) => fetchTile(k, t)));
             if (abort.signal.aborted || mine !== seq) return; // 已有較新的載入
-            loadedArea.current.set(k, { bbox, center, truncated: data.truncated });
-            loadedResult.current.set(k, { count: data.pipes.length, truncated: data.truncated });
-            scene.setPipes(k, data.pipes);
-          }),
-        );
+            missing.forEach((t, j) => cache.set(tileKey(t), got[j]));
+          }
+          for (const t of batch) {
+            if (count >= PIPE3D_LIMIT) break;
+            const key = tileKey(t);
+            const pipes = cache.get(key)!;
+            cache.delete(key); // 移到最後＝最近使用
+            cache.set(key, pipes);
+            chosen.push(key);
+            count += pipes.length;
+          }
+        }
+        // 記憶體上限：丟掉最久沒用、目前沒顯示的格子
+        for (const key of cache.keys()) {
+          if (cache.size <= PIPE3D_TILE_CACHE) break;
+          if (!chosen.includes(key)) cache.delete(key);
+        }
+        const truncated = chosen.length < tiles.length;
+        loadedResult.current.set(k, { count, truncated });
+        const sig = chosen.join(',');
+        if (shownTiles.current.get(k) !== sig) {
+          shownTiles.current.set(k, sig);
+          scene.setPipes(k, chosen.flatMap((key) => cache.get(key)!));
+        }
+      };
+      try {
+        await Promise.all(kinds.map(loadKind));
         if (mine === seq) status(summary());
       } catch (err) {
         if ((err as Error).name === 'AbortError' || abort.signal.aborted) return;

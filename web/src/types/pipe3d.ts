@@ -17,8 +17,8 @@ export interface Pipe3D {
   coords: [number, number, number][];
 }
 
-export interface Pipes3DResponse {
-  truncated: boolean;
+/** /api/pipes3d/{z}/{x}/{y}（預產格網）：起點落在該格的全部管線 */
+export interface Pipes3DTileResponse {
   pipes: Pipe3D[];
 }
 

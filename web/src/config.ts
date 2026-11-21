@@ -12,8 +12,16 @@ export const DATA_BOUNDS: [number, number, number, number] = [121.464, 24.966, 1
 
 /** 3D 管線：2D 縮放等級達此值才向 API 載入（太小範圍內管線過多）；載入範圍＝2D 畫面範圍 */
 export const PIPE3D_MIN_ZOOM = 17;
-/** 3D 管線：單次最多載入筆數（API 依離畫面中心距離排序） */
+/** 3D 管線：每種管線最多顯示筆數（格子從畫面中心往外載入，累計達此值就停；保護 Cesium 繪圖效能） */
 export const PIPE3D_LIMIT = 5000;
+/** 3D 管線格網的層級（與 API pipes3d_tiles.TILE_ZOOM 一致；台北一格約 600m × 550m） */
+export const PIPE3D_TILE_ZOOM = 16;
+/** 3D 管線：畫面範圍外擴（度，約 100m），起點在畫面外、但穿進畫面的管線也載入 */
+export const PIPE3D_TILE_MARGIN = 0.001;
+/** 3D 管線：每種管線在記憶體保留的格子數（超過時丟掉最久沒用的） */
+export const PIPE3D_TILE_CACHE = 300;
+/** 3D 管線：同時下載的格子數 */
+export const PIPE3D_TILE_CONCURRENCY = 6;
 /** 3D 管線：埋深超過此值視為異常資料，以此值顯示（約 235 筆 > 30m） */
 export const PIPE3D_MAX_DEPTH = 30;
 /** 3D 管線：埋深缺值（沒有或 ≤ 0）的管線改用這個顏色（埋深模式） */

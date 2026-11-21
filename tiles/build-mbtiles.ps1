@@ -9,6 +9,8 @@
 - 先產生到 tiles\mbtiles-build\，全部成功才搬進 tiles\mbtiles\。
   Martin（MBTiles 模式）執行中會鎖住檔案，搬移失敗時請先停止 Martin 再執行一次。
 - 資料庫密碼從 pgpass.conf（或 PGPASSWORD）讀取，不寫入檔案。
+- 2D 產完後接著產生 3D 管線格網（tiles\pipes3d\<資料表>.sqlite，API /api/pipes3d/16/{x}/{y} 讀取；
+  api\app\pipes3d_tiles.py）。-No3D 只產 2D、-Only3D 只產 3D。3D 換檔不必重啟 API。
 
 用法：
     .\build-mbtiles.ps1                       # 全部資料表
@@ -21,6 +23,8 @@ param(
     [int]$LiteMaxZoom = 13,
     [string]$Bbox = '121.45,24.95,121.68,25.22',
     [int]$Concurrency = 8,
+    [switch]$No3D,
+    [switch]$Only3D,
     [string]$Database = 'gis',
     [string]$User = 'postgres',
     [string]$DbHost = 'localhost',
@@ -66,6 +70,20 @@ if ($Source) {
     $todo = $Source
 }
 else { $todo = @($tables.Keys) }
+
+if ($No3D -and $Only3D) { throw '-No3D 與 -Only3D 不能同時使用。' }
+
+function Invoke-Pipes3DBuild {
+    Write-Host "產生 3D 管線格網：$($todo -join ', ') …"
+    Push-Location (Join-Path $root '..\api')
+    try {
+        $env:PYTHONIOENCODING = 'utf-8'
+        uv run python -m app.pipes3d_tiles @todo
+        if ($LASTEXITCODE -ne 0) { throw "3D 格網產生失敗（結束代碼 $LASTEXITCODE）。" }
+    }
+    finally { Pop-Location }
+}
+if ($Only3D) { Invoke-Pipes3DBuild; return }
 
 $build = Join-Path $root 'mbtiles-build'
 $out = Join-Path $root 'mbtiles'
@@ -136,4 +154,5 @@ foreach ($s in $todo) {
 }
 Remove-Item $build -Recurse -Force -ErrorAction SilentlyContinue
 $results | Format-Table -AutoSize
-Write-Host "完成，檔案在 $out。Martin 若正在執行，請重新啟動才會讀到新檔。"
+Write-Host "2D 完成，檔案在 $out。Martin 若正在執行，請重新啟動才會讀到新檔。"
+if (-not $No3D) { Invoke-Pipes3DBuild }

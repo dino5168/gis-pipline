@@ -15,3 +15,4 @@ tiles/tools/
 # 預先產生的圖磚（tiles/build-mbtiles.ps1 產生，檔案大）
 tiles/mbtiles/
 tiles/mbtiles-build/
+tiles/pipes3d/

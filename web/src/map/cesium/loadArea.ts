@@ -1,34 +1,42 @@
-// 3D 管線的載入範圍：以 2D 畫面範圍為準（與 2D 顯示的管線一致），畫面還在已載入範圍內就不重抓。
-import { PIPE3D_MAX_SPAN } from '../../config';
+// 3D 管線的載入範圍：以 2D 畫面範圍為準（與 2D 顯示的管線一致），換算成固定格網（Web Mercator 圖磚編號）。
+// 格子網址固定，瀏覽器／Nginx 可快取；同一格不重抓。
+import { PIPE3D_MAX_SPAN, PIPE3D_TILE_MARGIN } from '../../config';
 
 /** [west, south, east, north]（度） */
 export type Bbox = [number, number, number, number];
 
-/** 一種管線已載入的範圍 */
-export interface LoadedArea {
-  bbox: Bbox;
-  /** 載入時的畫面中心（API 依離 bbox 中心的距離取前 N 筆） */
-  center: [number, number];
-  /** 是否達筆數上限（只載入到中心附近） */
-  truncated: boolean;
+export interface TileXY {
+  x: number;
+  y: number;
 }
 
-/** 以中心為準，限制在 PIPE3D_MAX_SPAN 內（API 的 bbox 跨度上限） */
-export function clampSpan([w, s, e, n]: Bbox, [lng, lat]: [number, number]): Bbox {
-  const half = PIPE3D_MAX_SPAN / 2 - 1e-6;
+export const tileKey = (t: TileXY) => `${t.x}/${t.y}`;
+
+/** 經緯度 → 圖磚座標（小數，整數部分即圖磚編號） */
+function lngLatToTile(lng: number, lat: number, z: number): [number, number] {
+  const n = 2 ** z;
+  const r = (lat * Math.PI) / 180;
+  return [((lng + 180) / 360) * n, ((1 - Math.asinh(Math.tan(r)) / Math.PI) / 2) * n];
+}
+
+/** 以中心為準，限制在 PIPE3D_MAX_SPAN 內（避免 2D 傾斜／超大螢幕時一次要太多格） */
+function clampSpan([w, s, e, n]: Bbox, [lng, lat]: [number, number]): Bbox {
+  const half = PIPE3D_MAX_SPAN / 2;
   return [Math.max(w, lng - half), Math.max(s, lat - half), Math.min(e, lng + half), Math.min(n, lat + half)];
 }
 
-export const bboxParam = (b: Bbox) => b.map((x) => x.toFixed(6)).join(',');
-
-/**
- * 已載入的範圍是否還涵蓋目前畫面：畫面在範圍內即可（拉近不重抓）。
- * 達筆數上限時只有載入中心附近有資料，畫面中心離載入中心超過畫面寬高的 1/4 就重抓。
- */
-export function covers(area: LoadedArea, visible: Bbox, center: [number, number]): boolean {
-  const [w, s, e, n] = area.bbox;
-  const [vw, vs, ve, vn] = visible;
-  if (vw < w || vs < s || ve > e || vn > n) return false;
-  if (!area.truncated) return true;
-  return Math.abs(center[0] - area.center[0]) <= (ve - vw) / 4 && Math.abs(center[1] - area.center[1]) <= (vn - vs) / 4;
+/** 涵蓋畫面範圍（外擴 PIPE3D_TILE_MARGIN）的格子，依離畫面中心由近到遠排序 */
+export function tilesForView(view: Bbox, center: [number, number], z: number): TileXY[] {
+  const m = PIPE3D_TILE_MARGIN;
+  const [w, s, e, n] = clampSpan([view[0] - m, view[1] - m, view[2] + m, view[3] + m], center);
+  const [x0, y0] = lngLatToTile(w, n, z);
+  const [x1, y1] = lngLatToTile(e, s, z);
+  const [cx, cy] = lngLatToTile(center[0], center[1], z);
+  const tiles: (TileXY & { d: number })[] = [];
+  for (let x = Math.floor(x0); x <= Math.floor(x1); x++) {
+    for (let y = Math.floor(y0); y <= Math.floor(y1); y++) {
+      tiles.push({ x, y, d: (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 });
+    }
+  }
+  return tiles.sort((a, b) => a.d - b.d).map(({ x, y }) => ({ x, y }));
 }
