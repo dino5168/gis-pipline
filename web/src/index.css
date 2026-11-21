@@ -79,9 +79,48 @@
   }
 }
 
-/* MapLibre 彈出視窗固定淺色底 */
+/*
+ * MapLibre 彈出視窗（管線屬性、門牌標籤）：改用系統 token，跟著「系統樣式」主題變色，
+ * 外觀比照按鈕提示（TitleTooltip：bg-popover、細外框、rounded-md、shadow-md）。
+ */
 .maplibregl-popup-content {
-  padding: 10px 12px;
+  padding: 0.625rem 0.75rem;
   max-height: 60vh;
   overflow: auto;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border-radius: var(--radius-md);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent),
+    0 4px 6px -1px rgb(0 0 0 / 0.25),
+    0 2px 4px -2px rgb(0 0 0 / 0.25);
+}
+/* 箭頭顏色與內容同底色（MapLibre 用 border 畫三角形，依方向上色） */
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: var(--popover);
+}
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: var(--popover);
+}
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: var(--popover);
+}
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: var(--popover);
+}
+.maplibregl-popup-close-button {
+  color: var(--muted-foreground);
+  border-radius: var(--radius-sm);
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+.maplibregl-popup-close-button:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }

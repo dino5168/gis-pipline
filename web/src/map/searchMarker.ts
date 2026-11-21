@@ -9,9 +9,9 @@ export function setSearchMarker(map: maplibregl.Map, r: GeocodeResult | null) {
   markers.get(map)?.remove();
   markers.delete(map);
   if (!r) return;
-  // 彈出視窗固定淺色底（index.css），文字顏色比照 PipeAttributeTable
+  // 彈出視窗用系統 token（index.css），文字顏色比照 PipeAttributeTable
   const label = document.createElement('div');
-  label.className = 'text-[0.8125rem] font-semibold text-slate-900';
+  label.className = 'text-[0.8125rem] font-semibold text-popover-foreground pr-1';
   label.textContent = r.label;
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 36 }).setDOMContent(label);
   const marker = new maplibregl.Marker({ color: SEARCH_MARKER_COLOR })

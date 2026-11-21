@@ -35,21 +35,21 @@ const GROUPS: [Key, Key][][] = [
   ],
 ];
 
-const TH = 'py-0.5 pr-2.5 text-left align-top font-medium whitespace-nowrap text-slate-500';
+const TH = 'py-0.5 pr-2.5 text-left align-top font-medium whitespace-nowrap text-muted-foreground';
 
 /** 管線屬性表（顯示在地圖彈出視窗內，React 會自動跳脫字串）；分左右 2 排、依性質分組 */
 export function PipeAttributeTable({ title, id, props }: Props) {
   return (
-    <table className="border-collapse text-xs text-slate-900">
-      <caption className="pb-1.5 text-left text-[0.8125rem] font-semibold">{title} #{id}</caption>
+    <table className="border-collapse text-xs text-popover-foreground">
+      <caption className="pr-6 pb-1.5 text-left text-[0.8125rem] font-semibold">{title} #{id}</caption>
       {GROUPS.map((rows, g) => (
         // 組與組之間加分隔線
-        <tbody key={g} className={g > 0 ? 'border-t border-slate-200 [&>tr:first-child>*]:pt-1.5' : undefined}>
+        <tbody key={g} className={g > 0 ? 'border-t border-border [&>tr:first-child>*]:pt-1.5' : undefined}>
           {rows.map(([l, r]) => (
             <tr key={l}>
               <th className={TH}>{PIPE_LABELS[l]}</th>
               <td className="py-0.5 pr-5 align-top break-all">{formatPipeValue(l, props[l])}</td>
-              <th className={`${TH} border-l border-slate-200 pl-3`}>{PIPE_LABELS[r]}</th>
+              <th className={`${TH} border-l border-border pl-3`}>{PIPE_LABELS[r]}</th>
               <td className="py-0.5 align-top break-all">{formatPipeValue(r, props[r])}</td>
             </tr>
           ))}
