@@ -1,5 +1,5 @@
 // 3D 圖台的瀏覽輔助：下方正中間的立體導覽元件（小 Cesium 畫面，見 map/cesium/NavGizmo.ts）＋右上角的放大／重設視角／縮小。
-// 立體元件：左右拖曳轉方位、上下拖曳改俯仰（環繞畫面中心的地面點）；雙擊 N 轉正北；點天頂軸轉成正上方俯視。
+// 立體元件：左右拖曳轉方位、上下拖曳改俯仰（環繞畫面中心的地面點）；點 N 轉正北；點天頂軸轉成正上方俯視。
 import { useEffect, useRef, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { MapZoomControls } from './MapZoomControls';
 import type { CesiumScene } from '../map/cesium/CesiumScene';
@@ -73,20 +73,17 @@ export function Navigation3D({ scene }: { scene: CesiumScene }) {
       scene.endOrbit();
       return;
     }
-    // 單擊：點到天頂軸 → 正上方俯視
+    // 單擊：點到 N → 轉正北；點到天頂軸 → 正上方俯視
     const p = local(e);
-    if (gizmo.current?.pick(p.x, p.y) === 'zenith') scene.lookStraightDown();
+    const part = gizmo.current?.pick(p.x, p.y);
+    if (part === 'north') scene.faceNorth();
+    else if (part === 'zenith') scene.lookStraightDown();
   };
 
   const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current?.moved) scene.endOrbit();
     drag.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-  };
-
-  const onDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
-    const p = local(e);
-    if (gizmo.current?.pick(p.x, p.y) === 'north') scene.faceNorth();
   };
 
   return (
@@ -100,10 +97,9 @@ export function Navigation3D({ scene }: { scene: CesiumScene }) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
-        onDoubleClick={onDoubleClick}
         role="img"
-        aria-label="立體導覽：左右拖曳轉方位、上下拖曳改俯仰，雙擊 N 轉為正北，點天頂軸轉成正上方俯視"
-        title="左右拖曳轉方位、上下拖曳改俯仰；雙擊 N 轉正北；點天頂軸俯視"
+        aria-label="立體導覽：左右拖曳轉方位、上下拖曳改俯仰，點 N 轉為正北，點天頂軸轉成正上方俯視"
+        title="左右拖曳轉方位、上下拖曳改俯仰；點 N 轉正北；點天頂軸俯視"
       />
 
       <MapZoomControls
