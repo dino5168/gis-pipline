@@ -274,6 +274,7 @@ export default function App() {
               onProfileOpen={openProfile}
               onProfileClose={() => setProfileOpen(false)}
               clashOpen={clashOpen}
+              onClashOpen={openClash}
               onClashClose={() => setClashOpen(false)}
               mapRef={mapRef}
               onZoomChange={setZoom}

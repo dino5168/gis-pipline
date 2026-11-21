@@ -171,7 +171,7 @@ export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, on
     : [];
 
   let status: string;
-  if (drawing) status = '在 2D 圖台單擊加點，雙擊或 Enter 完成（Backspace 退一點、Esc 取消）';
+  if (drawing) status = '在 2D 圖台單擊加點，雙擊或 Enter 完成（Backspace 退一點、Esc 取消）；要輸入坐標請用命令列 CC';
   else if (!line) status = '按「重畫規劃管線」開始';
   else if (!layers.length) status = '沒有開啟的管線種類（選單「管線」）';
   else if (load.kind === 'loading') status = '檢核中…';

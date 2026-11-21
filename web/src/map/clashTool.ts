@@ -93,6 +93,13 @@ export class ClashTool {
     this.render();
   }
 
+  /** 直接設定規劃管線（命令列 CLASH 輸入的各點） */
+  setLine(line: LngLat[]): void {
+    this.clear();
+    this.line = line;
+    this.render();
+  }
+
   setPoints(points: ClashMapPoint[]): void {
     this.points = points;
     this.highlight = null;

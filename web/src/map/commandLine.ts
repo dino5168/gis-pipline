@@ -1,6 +1,6 @@
 // 2D 命令列引擎（仿 AutoCAD Command）：解析輸入、執行命令、命令中接管地圖點選取點。
 // 命令本身（LINE、PLINE、POLYGON、RECTANG、CIRCLE、POINT、SELECT、MOVE、COPY、ROTATE、ERASE）在 commandSessions.ts；
-// MEASUREGEOM 在 commandMeasure.ts、PROFILE（剖面分析）在 commandProfile.ts（量測值標籤用 Marker：地圖樣式沒有 glyphs，不能用 symbol 文字）；
+// MEASUREGEOM 在 commandMeasure.ts、PROFILE（剖面分析）在 commandProfile.ts、CLASH（衝突檢核）在 commandClash.ts（量測值標籤用 Marker：地圖樣式沒有 glyphs，不能用 symbol 文字）；
 // HELP（?）不是 Session：開啟右側說明面板，命令執行中也可輸入（不中斷命令）。
 // 選取判斷在 commandSelect.ts；目前選取由引擎保存並醒目顯示（黃色）。
 // 畫出的圖形加到繪圖工具（DrawTool），可在繪圖面板編輯、復原、匯出。
@@ -32,6 +32,7 @@ import {
 } from './commandSessions';
 import { MeasureGeomSession } from './commandMeasure';
 import { ProfileSession } from './commandProfile';
+import { ClashSession } from './commandClash';
 import { DEFAULT_COORD_DISPLAY, type CoordDisplaySettings } from '../types/coordSystem';
 import {
   COMMAND_ALIASES,
@@ -70,6 +71,8 @@ interface Options {
   onHelp: (topic: string | null) => void;
   /** PROFILE：以剖面線（經緯度 A、B）開啟剖面分析 */
   onProfile: (line: [[number, number], [number, number]]) => void;
+  /** CLASH：以規劃管線（經緯度點串）開啟衝突檢核 */
+  onClash: (line: [number, number][]) => void;
   sink: CommandSink;
 }
 
@@ -159,6 +162,7 @@ export class CommandLineEngine {
       erase: (ids) => this.opts.sink.eraseFeatures(ids),
       pickGeometry: (xy) => this.pickGeometry(xy),
       profile: (a, b) => this.opts.onProfile([toLngLat(a), toLngLat(b)]),
+      clash: (pts) => this.opts.onClash(pts.map(toLngLat)),
     };
   }
 
@@ -269,6 +273,8 @@ export class CommandLineEngine {
         return new MeasureGeomSession(this.ctx);
       case 'PROFILE':
         return new ProfileSession(this.ctx);
+      case 'CLASH':
+        return new ClashSession(this.ctx);
       default:
         return new LineSession(this.ctx, this.lastLineEnd);
     }

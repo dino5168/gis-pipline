@@ -86,6 +86,8 @@ interface Props {
   onProfileClose: () => void;
   /** 分析 → 衝突檢核 */
   clashOpen: boolean;
+  /** 開啟衝突檢核視窗（命令列 CLASH 用） */
+  onClashOpen: () => void;
   onClashClose: () => void;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
@@ -188,6 +190,7 @@ export function MapView({
   onProfileOpen,
   onProfileClose,
   clashOpen,
+  onClashOpen,
   onClashClose,
   mapRef,
   onZoomChange,
@@ -293,6 +296,22 @@ export function MapView({
   };
   const profileFromCommandRef = useRef(profileFromCommand);
   profileFromCommandRef.current = profileFromCommand;
+  /** 命令列 CLASH 給的規劃管線：做法同 PROFILE */
+  const pendingClashLine = useRef<LngLat[] | null>(null);
+  const applyClashLine = (line: LngLat[]) => {
+    clashRef.current?.setLine(line);
+    setClashLine(line);
+    setClashDrawing(false);
+  };
+  const clashFromCommand = (line: LngLat[]) => {
+    if (clashOpen) applyClashLine(line);
+    else {
+      pendingClashLine.current = line;
+      onClashOpen();
+    }
+  };
+  const clashFromCommandRef = useRef(clashFromCommand);
+  clashFromCommandRef.current = clashFromCommand;
 
   // 用 ref 保存最新的 callback，避免地圖重建
   const cb = useRef({ onZoomChange, onTileError });
@@ -357,6 +376,7 @@ export function MapView({
       onChange: setCmdState,
       onHelp: (topic) => setCmdHelp({ open: true, topic }),
       onProfile: (line) => profileFromCommandRef.current(line),
+      onClash: (line) => clashFromCommandRef.current(line),
       onStart: () => {
         closeMeasureRef.current();
         closeDrawRef.current();
@@ -489,14 +509,19 @@ export function MapView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileOpen]);
-  // ---- 衝突檢核：開啟時直接開始畫規劃管線，關閉時清除
+  // ---- 衝突檢核：開啟時直接開始畫規劃管線（命令列 CLASH 已給線就直接套用），關閉時清除
   useEffect(() => {
-    if (clashOpen) startClashDrawingRef.current();
-    else {
+    if (clashOpen) {
+      const line = pendingClashLine.current;
+      pendingClashLine.current = null;
+      if (line) applyClashLine(line);
+      else startClashDrawingRef.current();
+    } else {
       clashRef.current?.clear();
       setClashLine(null);
       setClashDrawing(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clashOpen]);
 
   // ---- 底圖切換

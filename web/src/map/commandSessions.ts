@@ -11,7 +11,7 @@
 //   COPY（CO）    複製：同 MOVE，可連續複製多份
 //   ROTATE（RO）  旋轉：基準點 → 角度（或參考 R、複製 C）
 //   ERASE（E）    刪除
-// MEASUREGEOM（MEA）幾何量測在 commandMeasure.ts；PROFILE（PA）剖面分析在 commandProfile.ts。
+// MEASUREGEOM（MEA）幾何量測在 commandMeasure.ts；PROFILE（PA）剖面分析在 commandProfile.ts；CLASH（CC）衝突檢核在 commandClash.ts。
 import type { XY } from './commandInput';
 import type { CommandMessage, CommandOption, CommandPrompt, CommandShapeMode, XYTransform } from '../types/commandLine';
 
@@ -55,6 +55,8 @@ export interface SessionContext {
   pickGeometry(xy: XY): ShapeXY | null;
   /** 以 A → B 開啟剖面分析（PROFILE） */
   profile(a: XY, b: XY): void;
+  /** 以規劃管線各點開啟衝突檢核（CLASH） */
+  clash(pts: XY[]): void;
 }
 
 /** 圖形的 TWD97 平面坐標幾何（多邊形環首尾相同） */
