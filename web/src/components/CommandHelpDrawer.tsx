@@ -91,7 +91,7 @@ export function CommandHelpDrawer({ open, onOpenChange, topic }: Props) {
         <DrawerHeader className="flex-row items-start justify-between">
           <div>
             <DrawerTitle>命令說明</DrawerTitle>
-            <DrawerDescription>2D 命令列（仿 AutoCAD）；指令不分大小寫</DrawerDescription>
+            <DrawerDescription>2D 命令列；指令不分大小寫</DrawerDescription>
           </div>
           <DrawerClose asChild>
             <Button variant="ghost" size="icon-sm" aria-label="關閉">
