@@ -1,5 +1,5 @@
 // 2D 命令列引擎（仿 AutoCAD Command）：解析輸入、執行命令、命令中接管地圖點選取點。
-// 命令本身（LINE、PLINE、POLYGON、RECTANG、CIRCLE、POINT、SELECT、MOVE、COPY、ROTATE、ERASE）在 commandSessions.ts；
+// 命令本身（LINE、PLINE、POLYGON、RECTANG、CIRCLE、ARC、POINT、SELECT、MOVE、COPY、ROTATE、ERASE）在 commandSessions.ts；
 // MEASUREGEOM 在 commandMeasure.ts、PROFILE（剖面分析）在 commandProfile.ts、CLASH（衝突檢核）在 commandClash.ts（量測值標籤用 Marker：地圖樣式沒有 glyphs，不能用 symbol 文字）；
 // HELP（?）不是 Session：開啟右側說明面板，命令執行中也可輸入（不中斷命令）。
 // 選取判斷在 commandSelect.ts；目前選取由引擎保存並醒目顯示（黃色）。
@@ -11,6 +11,7 @@ import { lngLatToTwd97, twd97ToLngLat } from './coordTransform';
 import { formatPoint, parsePointInput, type XY } from './commandInput';
 import { pickShape, windowSelect, type Px, type Shape } from './commandSelect';
 import {
+  ArcSession,
   CircleSession,
   CommandSession,
   CopySession,
@@ -257,6 +258,8 @@ export class CommandLineEngine {
         return new RectangSession(this.ctx);
       case 'CIRCLE':
         return new CircleSession(this.ctx);
+      case 'ARC':
+        return new ArcSession(this.ctx);
       case 'POINT':
         return new PointSession(this.ctx);
       case 'SELECT':

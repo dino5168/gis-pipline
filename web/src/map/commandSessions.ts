@@ -5,6 +5,7 @@
 //   POLYGON（POL）正多邊形：邊數 → 中心 → 內接／外切 → 半徑；或 邊（E）指定一邊兩端點
 //   RECTANG（REC）矩形：兩角點；或 尺寸（D）長、寬，再點方向
 //   CIRCLE（C）   圓：中心＋半徑／直徑（D）、兩點（2P）、三點（3P）
+//   ARC（A）      圓弧：三點；起點＋圓心（C）／終點（E）組合，或先指定圓心；存成多點線
 //   POINT（PO）   點：連續放置，Enter 結束
 //   SELECT        選取物件（單擊、框選），結束後保留為目前選取（醒目顯示）
 //   MOVE（M）     移動：選取物件（或用目前選取）→ 基準點 → 第二點
@@ -655,6 +656,279 @@ export class CircleSession extends CommandSession {
   }
 }
 
+// ---- ARC
+/** 圓弧：圓心、半徑、起始方位角、掃過角（弧度；正＝逆時針） */
+export interface Arc {
+  c: XY;
+  r: number;
+  a0: number;
+  sweep: number;
+}
+
+const TWO_PI = 2 * Math.PI;
+/** 正規化到 [0, 2π) */
+const wrap2pi = (t: number) => ((t % TWO_PI) + TWO_PI) % TWO_PI;
+/** 正規化到 (-π, π] */
+const wrapPi = (t: number) => {
+  const w = wrap2pi(t);
+  return w > Math.PI ? w - TWO_PI : w;
+};
+
+/** 圓弧轉點串（密度同 CIRCLE：一整圈 64 段） */
+export function arcPoints(a: Arc): XY[] {
+  const n = Math.max(4, Math.ceil((Math.abs(a.sweep) / TWO_PI) * CIRCLE_SEGMENTS));
+  return Array.from({ length: n + 1 }, (_, k) => polar(a.c, a.r, a.a0 + (a.sweep * k) / n));
+}
+
+/** 三點：起點 → 經過第二點 → 終點 */
+export function arc3p(s: XY, m: XY, e: XY): Arc | null {
+  const cc = circumcircle(s, m, e);
+  if (!cc) return null;
+  const a0 = angle(cc.c, s);
+  const a2 = angle(cc.c, e);
+  const ccw = (m[0] - s[0]) * (e[1] - s[1]) - (m[1] - s[1]) * (e[0] - s[0]) > 0;
+  return { c: cc.c, r: cc.r, a0, sweep: ccw ? wrap2pi(a2 - a0) : -wrap2pi(a0 - a2) };
+}
+
+/** 起點、圓心，逆時針到終點的方向（終點只決定方向） */
+export function arcSCE(s: XY, c: XY, e: XY): Arc | null {
+  const r = dist(c, s);
+  if (r < EPS || dist(c, e) < EPS) return null;
+  const a0 = angle(c, s);
+  const sweep = wrap2pi(angle(c, e) - a0);
+  return sweep < EPS ? null : { c, r, a0, sweep };
+}
+
+/** 起點、圓心、弦長（負值＝大弧），逆時針 */
+export function arcSCL(s: XY, c: XY, len: number): Arc | null {
+  const r = dist(c, s);
+  if (r < EPS || Math.abs(len) < EPS || Math.abs(len) > 2 * r + EPS) return null;
+  const minor = 2 * Math.asin(Math.min(1, Math.abs(len) / (2 * r)));
+  return { c, r, a0: angle(c, s), sweep: len > 0 ? minor : TWO_PI - minor };
+}
+
+/** 起點、終點、夾角（正＝逆時針，絕對值 0～360° 不含） */
+export function arcSEA(s: XY, e: XY, sweep: number): Arc | null {
+  const d = dist(s, e);
+  if (d < EPS || Math.abs(sweep) < EPS || Math.abs(sweep) >= TWO_PI - EPS) return null;
+  const r = d / (2 * Math.abs(Math.sin(sweep / 2)));
+  const h = d / 2 / Math.tan(sweep / 2);
+  const ux = (e[0] - s[0]) / d;
+  const uy = (e[1] - s[1]) / d;
+  // 圓心在弦中點的法線上（逆時針小弧時在弦的左側）
+  const c: XY = [(s[0] + e[0]) / 2 - uy * h, (s[1] + e[1]) / 2 + ux * h];
+  return { c, r, a0: angle(c, s), sweep };
+}
+
+/** 起點、終點、起點的切線方向 */
+export function arcSED(s: XY, e: XY, dir: number): Arc | null {
+  const half = wrapPi(angle(s, e) - dir);
+  if (Math.abs(half) < EPS || Math.abs(Math.abs(half) - Math.PI) < EPS) return null;
+  return arcSEA(s, e, 2 * half);
+}
+
+/** 起點、終點、半徑（負值＝大弧），逆時針 */
+export function arcSER(s: XY, e: XY, r: number): Arc | null {
+  const d = dist(s, e);
+  if (Math.abs(r) < EPS || Math.abs(r) < d / 2 - EPS) return null;
+  const minor = 2 * Math.asin(Math.min(1, d / (2 * Math.abs(r))));
+  return arcSEA(s, e, r > 0 ? minor : TWO_PI - minor);
+}
+
+type ArcStage =
+  | 'start'
+  | 'second'
+  | 'end3p'
+  | 'center0'
+  | 'cStart'
+  | 'scCenter'
+  | 'scEnd'
+  | 'scAngle'
+  | 'scChord'
+  | 'seEnd'
+  | 'seHow'
+  | 'seAngle'
+  | 'seDir'
+  | 'seRadius';
+
+const ARC_NEXT: Partial<Record<ArcStage, Record<string, ArcStage>>> = {
+  start: { C: 'center0' },
+  second: { C: 'scCenter', E: 'seEnd' },
+  scEnd: { A: 'scAngle', L: 'scChord' },
+  seHow: { A: 'seAngle', D: 'seDir', R: 'seRadius' },
+};
+
+export class ArcSession extends CommandSession {
+  readonly name = 'ARC';
+  private stage: ArcStage = 'start';
+  private start: XY | null = null;
+  private center: XY | null = null;
+  /** 三點的第二點，或「起點、終點」的終點 */
+  private mid: XY | null = null;
+
+  step(): Step {
+    const s = this.start;
+    const ask = (text: string, input: StepInput, base: XY | null, options: CommandOption[] = []): Step => ({
+      command: this.name,
+      text,
+      options,
+      input,
+      base,
+    });
+    switch (this.stage) {
+      case 'start':
+        return ask('指定圓弧的起點或', 'point', null, [opt('C', '圓心')]);
+      case 'second':
+        return ask('指定圓弧的第二點或', 'point', s, [opt('C', '圓心'), opt('E', '終點')]);
+      case 'end3p':
+        return ask('指定圓弧的終點', 'point', this.mid);
+      case 'center0':
+        return ask('指定圓弧的圓心', 'point', null);
+      case 'scCenter':
+        return ask('指定圓弧的圓心', 'point', s);
+      case 'cStart':
+        return ask('指定圓弧的起點', 'point', this.center);
+      case 'scEnd':
+        return ask('指定圓弧的終點（逆時針）或', 'point', this.center, [opt('A', '角度'), opt('L', '弦長')]);
+      case 'scAngle':
+      case 'seAngle':
+        return ask('指定夾角（度，正＝逆時針、負＝順時針）', 'number', s);
+      case 'scChord':
+        return ask('指定弦長（負值＝大弧）', 'pointOrNumber', s);
+      case 'seEnd':
+        return ask('指定圓弧的終點', 'point', s);
+      case 'seHow':
+        return ask('指定圓弧的圓心或', 'point', s, [opt('A', '角度'), opt('D', '方向'), opt('R', '半徑')]);
+      case 'seDir':
+        return ask('指定起點的切線方向（度，0° 朝東、逆時針為正）', 'pointOrNumber', s);
+      case 'seRadius':
+        return ask('指定圓弧的半徑（負值＝大弧）', 'pointOrNumber', this.mid);
+    }
+  }
+
+  onKeyword(key: string) {
+    const to = ARC_NEXT[this.stage]?.[key];
+    if (to) this.stage = to;
+  }
+
+  onPoint(xy: XY) {
+    const s = this.start;
+    switch (this.stage) {
+      case 'start':
+        this.start = xy;
+        this.stage = 'second';
+        return;
+      case 'second':
+        if (dist(s!, xy) < EPS) return this.error('與起點相同，請指定其他點');
+        this.mid = xy;
+        this.stage = 'end3p';
+        return;
+      case 'center0':
+        this.center = xy;
+        this.stage = 'cStart';
+        return;
+      case 'cStart':
+        if (dist(this.center!, xy) < EPS) return this.error('起點不可與圓心相同');
+        this.start = xy;
+        this.stage = 'scEnd';
+        return;
+      case 'scCenter':
+        if (dist(s!, xy) < EPS) return this.error('圓心不可與起點相同');
+        this.center = xy;
+        this.stage = 'scEnd';
+        return;
+      case 'seEnd':
+        if (dist(s!, xy) < EPS) return this.error('終點不可與起點相同');
+        this.mid = xy;
+        this.stage = 'seHow';
+        return;
+      // 點選：弦長＝起點到該點、半徑＝終點到該點（同 AutoCAD）
+      case 'scChord':
+        return this.onNumber(dist(s!, xy));
+      case 'seRadius':
+        return this.onNumber(dist(this.mid!, xy));
+      default: {
+        const arc = this.pointArc(xy);
+        if (arc) return this.create(arc);
+        if (this.stage === 'end3p') return this.error('三點共線，無法決定圓弧');
+        if (this.stage === 'seDir') return this.error('切線方向與弦同向或反向，無法決定圓弧');
+        return this.error('無法由此點決定圓弧，請指定其他點');
+      }
+    }
+  }
+
+  onNumber(n: number) {
+    const s = this.start!;
+    const badAngle = n === 0 || Math.abs(n) >= 360;
+    switch (this.stage) {
+      case 'scAngle': {
+        if (badAngle) return this.error('夾角須介於 -360° 與 360° 之間且不為 0');
+        const c = this.center!;
+        return this.create({ c, r: dist(c, s), a0: angle(c, s), sweep: toRad(n) });
+      }
+      case 'scChord': {
+        const arc = arcSCL(s, this.center!, n);
+        return arc ? this.create(arc) : this.error(`弦長須大於 0 且不超過直徑 ${fmt(2 * dist(this.center!, s))} m`);
+      }
+      case 'seAngle': {
+        if (badAngle) return this.error('夾角須介於 -360° 與 360° 之間且不為 0');
+        const arc = arcSEA(s, this.mid!, toRad(n));
+        return arc ? this.create(arc) : this.error('無法決定圓弧');
+      }
+      case 'seDir': {
+        const arc = arcSED(s, this.mid!, toRad(n));
+        return arc ? this.create(arc) : this.error('切線方向與弦同向或反向，無法決定圓弧');
+      }
+      case 'seRadius': {
+        const arc = arcSER(s, this.mid!, n);
+        return arc ? this.create(arc) : this.error(`半徑須不小於弦長的一半 ${fmt(dist(s, this.mid!) / 2)} m`);
+      }
+    }
+  }
+
+  /** 以點位決定圓弧（點選與預覽共用） */
+  private pointArc(xy: XY): Arc | null {
+    const s = this.start;
+    if (!s) return null;
+    switch (this.stage) {
+      case 'end3p':
+        return arc3p(s, this.mid!, xy);
+      case 'scEnd':
+        return arcSCE(s, this.center!, xy);
+      case 'seHow':
+        return arcSCE(s, xy, this.mid!);
+      case 'seDir':
+        return dist(s, xy) < EPS ? null : arcSED(s, this.mid!, angle(s, xy));
+      case 'scChord':
+        return arcSCL(s, this.center!, dist(s, xy));
+      case 'seRadius':
+        return arcSER(s, this.mid!, dist(this.mid!, xy));
+      default:
+        return null;
+    }
+  }
+
+  private create(arc: Arc) {
+    if (this.ctx.add('linestring', arcPoints(arc)) === null) return;
+    const deg = Math.abs(toDeg(arc.sweep));
+    const dir = arc.sweep > 0 ? '逆時針' : '順時針';
+    this.ctx.log('info', `已建立圓弧：半徑 ${fmt(arc.r)} m、夾角 ${fmtNum(deg)}°（${dir}）、弧長 ${fmt(arc.r * Math.abs(arc.sweep))} m`);
+    this.done = true;
+  }
+
+  preview(cursor: XY | null): Preview {
+    const pts = [this.start, this.mid, this.center].filter((p): p is XY => p !== null);
+    if (!pts.length) return NO_PREVIEW;
+    if (!cursor) return { points: pts, lines: [] };
+    const lines: XY[][] = [];
+    const base = this.step().base;
+    if (base) lines.push([base, cursor]);
+    const arc = this.pointArc(cursor);
+    if (arc && arc.r > EPS) lines.push(arcPoints(arc));
+    return { points: pts, lines };
+  }
+}
+
 // ---- POINT
 export class PointSession extends CommandSession {
   readonly name = 'POINT';
@@ -876,8 +1150,8 @@ const rotateAbout =
     return [c[0] + (x - c[0]) * cos - (y - c[1]) * sin, c[1] + (x - c[0]) * sin + (y - c[1]) * cos];
   };
 
-const toDeg = (r: number) => (r * 180) / Math.PI;
-const toRad = (d: number) => (d * Math.PI) / 180;
+export const toDeg = (r: number) => (r * 180) / Math.PI;
+export const toRad = (d: number) => (d * Math.PI) / 180;
 
 /** 物件外形預覽加上基準點與橡皮筋線 */
 function withGuide(pv: Preview, base: XY, cursor: XY): Preview {
