@@ -1,15 +1,17 @@
 // 剖面分析視窗（浮動在 2D 圖台上方，可拖曳標題列移動）：
 // 剖面線與管線的交點畫成斷面圖（X＝距起點 A 的距離，Y＝埋深，地表 = 0），
 // 各管線依種類配色畫圓形／矩形（管徑依深度比例，保持正圓），上方標註「代碼 管材 管徑 權屬」。
-import { Loader2, PenLine, X } from 'lucide-react';
+import { Download, Loader2, PenLine, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { PIPE3D_NO_DEPTH_COLOR } from '../config';
 import { formatDistance } from '../map/measure';
 import type { ProfileMapPoint } from '../map/profileTool';
+import type { CoordDisplaySettings } from '../types/coordSystem';
 import { PIPE_KINDS, PIPE_KIND_BY_ID, type PipeKindId } from '../types/pipeKind';
-import { formatSize, profileShape, type LngLat, type ProfilePipe, type ProfileResult } from '../types/profile';
+import { formatSize, type LngLat, type ProfileResult } from '../types/profile';
+import { kindColor, ProfileChart, SCREEN_INK } from './ProfileChart';
 
 interface Props {
   /** 剖面線（null＝還沒畫好） */
@@ -17,6 +19,8 @@ interface Props {
   /** 畫線中 */
   drawing: boolean;
   enabledKinds: ReadonlySet<PipeKindId>;
+  /** 坐標系設定（匯出 PNG 標示 A／B 坐標） */
+  coordDisplay: CoordDisplaySettings;
   onRedraw: () => void;
   onClose: () => void;
   /** 交點（給地圖標示） */
@@ -31,33 +35,17 @@ type Load =
   | { kind: 'error'; message: string }
   | { kind: 'done'; result: ProfileResult };
 
-const kindColor = (p: ProfilePipe) => (p.depth === null ? PIPE3D_NO_DEPTH_COLOR : PIPE_KIND_BY_ID[p.layer]?.color ?? '#888');
-const kindCode = (p: ProfilePipe) => PIPE_KIND_BY_ID[p.layer]?.code ?? '?';
-
-/** 屬性標註：代碼 管材 管徑 權屬（＋異常註記） */
-function pipeLabel(p: ProfilePipe): string {
-  const parts = [kindCode(p), p.material ?? '—', formatSize(p), p.mgmt_unit ?? '—'];
-  if (p.depth === null) parts.push('埋深缺值');
-  else if (p.clamped) parts.push('埋深異常');
-  return parts.join(' ');
-}
-
-/** 1、2、5×10ⁿ 的刻度間距 */
-function niceStep(raw: number): number {
-  const p = 10 ** Math.floor(Math.log10(raw));
-  const f = raw / p;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
-}
-
 /** 目前根字級（px），讓圖面尺寸隨「系統樣式 → 文字大小」縮放 */
 const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 
-export function ProfileWindow({ line, drawing, enabledKinds, onRedraw, onClose, onPoints, onHover }: Props) {
+export function ProfileWindow({ line, drawing, enabledKinds, coordDisplay, onRedraw, onClose, onPoints, onHover }: Props) {
   const [load, setLoad] = useState<Load>({ kind: 'idle' });
   const [hover, setHover] = useState<number | null>(null);
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const boxRef = useRef<HTMLDivElement>(null);
   const [boxWidth, setBoxWidth] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const cb = useRef({ onPoints, onHover });
   cb.current = { onPoints, onHover };
 
@@ -65,6 +53,7 @@ export function ProfileWindow({ line, drawing, enabledKinds, onRedraw, onClose, 
   const layers = useMemo(() => PIPE_KINDS.filter((k) => enabledKinds.has(k.id)).map((k) => k.id), [enabledKinds]);
   useEffect(() => {
     setHover(null);
+    setExportError(null);
     if (!line || !layers.length) {
       setLoad({ kind: 'idle' });
       cb.current.onPoints([]);
@@ -121,8 +110,24 @@ export function ProfileWindow({ line, drawing, enabledKinds, onRedraw, onClose, 
   const hovered = result && hover !== null ? result.pipes[hover] : null;
   const usedKinds = result ? PIPE_KINDS.filter((k) => result.pipes.some((p) => p.layer === k.id)) : [];
 
+  // 匯出 PNG（匯出程式含 react-dom/server，動態載入）
+  const exportPng = async () => {
+    if (!result || !line) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { exportProfilePng } = await import('./profileExport');
+      await exportProfilePng(result, line, coordDisplay);
+    } catch (e) {
+      setExportError(`匯出失敗：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   let status: string;
-  if (drawing) status = line ? '' : '在 2D 圖台依序點選剖面線起點 A、終點 B（Esc 取消）；要輸入坐標請用命令列 PA';
+  if (exportError) status = exportError;
+  else if (drawing) status = line ? '' : '在 2D 圖台依序點選剖面線起點 A、終點 B（Esc 取消）；要輸入坐標請用命令列 PA';
   else if (!line) status = '按「重畫剖面線」開始';
   else if (!layers.length) status = '沒有開啟的管線種類（選單「管線」）';
   else if (load.kind === 'loading') status = '查詢中…';
@@ -141,7 +146,7 @@ export function ProfileWindow({ line, drawing, enabledKinds, onRedraw, onClose, 
         onPointerDown={startDrag}
       >
         <span className="font-semibold">剖面分析</span>
-        <span className={cn('text-muted-foreground min-w-0 flex-1 truncate', load.kind === 'error' && 'text-destructive')}>
+        <span className={cn('text-muted-foreground min-w-0 flex-1 truncate', (load.kind === 'error' || exportError) && 'text-destructive')}>
           {load.kind === 'loading' && <Loader2 className="mr-1 inline size-3 animate-spin" />}
           {status}
         </span>
@@ -149,13 +154,23 @@ export function ProfileWindow({ line, drawing, enabledKinds, onRedraw, onClose, 
           <PenLine />
           重畫剖面線
         </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          title="將剖面分析圖匯出成 PNG（白底、含坐標與圖例）"
+          onClick={exportPng}
+          disabled={!result || !line || drawing || exporting}
+        >
+          {exporting ? <Loader2 className="animate-spin" /> : <Download />}
+          匯出
+        </Button>
         <Button variant="ghost" size="icon-xs" title="關閉剖面分析" aria-label="關閉剖面分析" onClick={onClose}>
           <X />
         </Button>
       </div>
       <div ref={boxRef} className="overflow-x-auto">
         {result && boxWidth > 0 && (
-          <ProfileChart result={result} width={boxWidth} hover={hover} onHover={setHover} />
+          <ProfileChart result={result} width={boxWidth} rem={remPx()} ink={SCREEN_INK} hover={hover} onHover={setHover} />
         )}
       </div>
       {result && (
@@ -188,131 +203,5 @@ export function ProfileWindow({ line, drawing, enabledKinds, onRedraw, onClose, 
         </div>
       )}
     </div>
-  );
-}
-
-// ---- 斷面圖（SVG，以實際像素繪製，文字用 rem 才會跟著系統字級）
-function ProfileChart({
-  result,
-  width,
-  hover,
-  onHover,
-}: {
-  result: ProfileResult;
-  width: number;
-  hover: number | null;
-  onHover: (i: number | null) => void;
-}) {
-  const rem = remPx();
-  const fontPx = rem * 0.6875;
-  const gap = fontPx * 1.35; // 直書標註的最小間距
-  const n = result.pipes.length;
-  const padL = rem * 3;
-  const padR = rem;
-  // 標註放不下時加寬（視窗可橫向捲動）
-  const w = Math.max(width, padL + padR + n * gap);
-  const labelBand = rem * 9.5;
-  const plotTop = labelBand + rem * 0.75;
-  const plotH = rem * 9;
-  const h = plotTop + plotH + rem * 1.75;
-  const plotW = w - padL - padR;
-  const L = result.length;
-  const sx = plotW / L;
-
-  const shapes = result.pipes.map(profileShape);
-  const maxDepth = Math.max(1, ...result.pipes.map((p, i) => (p.depth ?? 0) + shapes[i].h));
-  const yStep = niceStep(maxDepth / 4);
-  const yMax = Math.ceil((maxDepth * 1.08) / yStep) * yStep;
-  const sy = plotH / yMax;
-  const X = (d: number) => padL + d * sx;
-  const Y = (depth: number) => plotTop + depth * sy;
-
-  const xStep = niceStep(L / Math.max(2, plotW / (rem * 5)));
-  const xTicks: number[] = [];
-  for (let d = 0; d <= L + 1e-6; d += xStep) xTicks.push(d);
-  const yTicks: number[] = [];
-  for (let d = 0; d <= yMax + 1e-6; d += yStep) yTicks.push(d);
-
-  // 標註水平位置：依序排開，至少相隔 gap，不超出左右邊界
-  const px = result.pipes.map((p) => X(p.dist));
-  const lx = [...px];
-  for (let i = 1; i < n; i++) lx[i] = Math.max(lx[i], lx[i - 1] + gap);
-  const right = w - padR;
-  if (n) lx[n - 1] = Math.min(lx[n - 1], right);
-  for (let i = n - 2; i >= 0; i--) lx[i] = Math.min(lx[i], lx[i + 1] - gap);
-  for (let i = 0; i < n; i++) lx[i] = Math.max(lx[i], i ? lx[i - 1] + gap : padL);
-
-  const groundY = Y(0);
-  const elbow = groundY - rem * 0.75;
-  const textBase = elbow - rem * 0.5;
-
-  return (
-    <svg width={w} height={h} className="block" style={{ fontSize: `${fontPx}px` }} onMouseLeave={() => onHover(null)}>
-      {/* 格線與刻度 */}
-      {yTicks.map((d) => (
-        <g key={`y${d}`}>
-          <line x1={padL} x2={right} y1={Y(d)} y2={Y(d)} className="stroke-border" strokeDasharray={d ? '2 3' : undefined} />
-          <text x={padL - 4} y={Y(d)} textAnchor="end" dominantBaseline="middle" className="fill-muted-foreground">
-            {d ? `${+d.toFixed(2)} m` : 'GL 0'}
-          </text>
-        </g>
-      ))}
-      {xTicks.map((d) => (
-        <g key={`x${d}`}>
-          <line x1={X(d)} x2={X(d)} y1={plotTop + plotH} y2={plotTop + plotH + 4} className="stroke-muted-foreground" />
-          <text x={X(d)} y={plotTop + plotH + rem * 0.9} textAnchor="middle" className="fill-muted-foreground">
-            {+d.toFixed(1)}
-          </text>
-        </g>
-      ))}
-      <text x={padL} y={h - 2} className="fill-muted-foreground">A</text>
-      <text x={right} y={h - 2} textAnchor="end" className="fill-muted-foreground">B（距 A，m）</text>
-      {/* 地表線 */}
-      <line x1={padL} x2={right} y1={groundY} y2={groundY} className="stroke-foreground" strokeWidth={1.5} />
-
-      {/* 管線斷面＋標註 */}
-      {result.pipes.map((p, i) => {
-        const s = shapes[i];
-        const color = kindColor(p);
-        const top = p.depth ?? 0;
-        const pw = Math.max(s.w * sy, 4);
-        const ph = Math.max(s.h * sy, 4);
-        const cx = px[i];
-        const cy = Y(top) + ph / 2;
-        const on = hover === i;
-        return (
-          <g key={`${p.layer}-${p.gid}-${i}`} onMouseEnter={() => onHover(i)} className="cursor-default">
-            <polyline
-              points={`${cx},${Y(top)} ${cx},${groundY} ${lx[i]},${elbow} ${lx[i]},${textBase + 2}`}
-              fill="none"
-              className={on ? 'stroke-foreground' : 'stroke-muted-foreground'}
-              strokeOpacity={on ? 1 : 0.5}
-              strokeWidth={on ? 1.2 : 0.8}
-            />
-            {s.rect ? (
-              <rect x={cx - pw / 2} y={cy - ph / 2} width={pw} height={ph} fill={color} fillOpacity={0.85} />
-            ) : (
-              <circle cx={cx} cy={cy} r={pw / 2} fill={color} fillOpacity={0.85} />
-            )}
-            {on &&
-              (s.rect ? (
-                <rect x={cx - pw / 2 - 2} y={cy - ph / 2 - 2} width={pw + 4} height={ph + 4} fill="none" className="stroke-foreground" strokeWidth={1.5} />
-              ) : (
-                <circle cx={cx} cy={cy} r={pw / 2 + 2} fill="none" className="stroke-foreground" strokeWidth={1.5} />
-              ))}
-            <text
-              transform={`translate(${lx[i]},${textBase}) rotate(-90)`}
-              dominantBaseline="middle"
-              className={on ? 'fill-foreground font-semibold' : 'fill-foreground'}
-            >
-              <tspan style={{ fill: color }}>{kindCode(p)}</tspan> {pipeLabel(p).slice(kindCode(p).length + 1)}
-            </text>
-            {/* 透明的較大感應區，小管線也好指 */}
-            <rect x={lx[i] - gap / 2} y={0} width={gap} height={textBase + 2} fill="transparent" />
-            <circle cx={cx} cy={cy} r={Math.max(pw, ph) / 2 + 4} fill="transparent" />
-          </g>
-        );
-      })}
-    </svg>
   );
 }

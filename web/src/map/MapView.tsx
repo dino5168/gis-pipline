@@ -681,6 +681,7 @@ export function MapView({
           line={profileLine}
           drawing={profileDrawing}
           enabledKinds={enabledKinds}
+          coordDisplay={coordDisplay}
           onRedraw={startProfileDrawing}
           onClose={onProfileClose}
           onPoints={(pts) => profileRef.current?.setPoints(pts)}
