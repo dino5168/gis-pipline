@@ -1,6 +1,8 @@
 // 剖面分析的斷面圖（SVG，以實際像素繪製）：X＝距起點 A 的距離，Y＝埋深（地表 = 0），
 // 各管線依種類配色畫圓形／矩形（管徑依深度比例，保持正圓），上方直書標註「代碼 管材 管徑 權屬」。
 // 畫面與匯出 PNG 共用；配色由 ink 指定（畫面用 CSS 變數跟主題，匯出用固定淺色）。
+// 衝突檢核匯出 Excel 也用本圖（沿規劃管線的縱剖面）：另給 plan 畫規劃管線與檢核淨距範圍、
+// numbers 在標註前加序號（對應衝突清單）、marks 在管線外圈畫狀態色。
 import { PIPE3D_NO_DEPTH_COLOR } from '../config';
 import { PIPE_KIND_BY_ID } from '../types/pipeKind';
 import { formatSize, profileShape, type ProfilePipe, type ProfileResult } from '../types/profile';
@@ -36,6 +38,18 @@ function niceStep(raw: number): number {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
 }
 
+/** 沿規劃管線的縱剖面：規劃管線管頂埋深由起點線性變化到終點 */
+export interface ChartPlan {
+  /** 起點、終點管頂埋深（公尺） */
+  startDep: number;
+  endDep: number;
+  /** 管徑（公尺） */
+  dia: number;
+  /** 檢核淨距（公尺） */
+  clearance: number;
+  color: string;
+}
+
 export function ProfileChart({
   result,
   width,
@@ -44,6 +58,9 @@ export function ProfileChart({
   fontFamily,
   hover = null,
   onHover,
+  plan,
+  numbers,
+  marks,
 }: {
   result: ProfileResult;
   width: number;
@@ -53,6 +70,11 @@ export function ProfileChart({
   fontFamily?: string;
   hover?: number | null;
   onHover?: (i: number | null) => void;
+  plan?: ChartPlan;
+  /** 各管線標註前的序號（對應清單；管線須依 dist 排序，序號可不連續） */
+  numbers?: number[];
+  /** 各管線外圈顏色（undefined＝不畫） */
+  marks?: (string | undefined)[];
 }) {
   const fontPx = rem * 0.6875;
   const gap = fontPx * 1.35; // 直書標註的最小間距
@@ -61,7 +83,10 @@ export function ProfileChart({
   const padR = rem;
   // 標註放不下時加寬（視窗可橫向捲動）
   const w = Math.max(width, padL + padR + n * gap);
-  const labelBand = rem * 9.5;
+  // 標註區高度：至少 9.5rem，最長的直書標註放得下（ASCII 約 0.6 字寬、中文 1 字寬）
+  const textLen = (t: string) => [...t].reduce((sum, ch) => sum + (ch.charCodeAt(0) < 0x2000 ? 0.6 : 1), 0) * fontPx;
+  const labels = result.pipes.map((p, i) => (numbers ? `${numbers[i]}. ` : '') + pipeLabel(p));
+  const labelBand = Math.max(rem * 9.5, ...labels.map((t) => textLen(t) + rem * 1.75));
   const plotTop = labelBand + rem * 0.75;
   const plotH = rem * 9;
   const h = plotTop + plotH + rem * 1.75;
@@ -70,7 +95,8 @@ export function ProfileChart({
   const sx = plotW / L;
 
   const shapes = result.pipes.map(profileShape);
-  const maxDepth = Math.max(1, ...result.pipes.map((p, i) => (p.depth ?? 0) + shapes[i].h));
+  const planBottom = plan ? Math.max(plan.startDep, plan.endDep) + plan.dia + plan.clearance : 0;
+  const maxDepth = Math.max(1, planBottom, ...result.pipes.map((p, i) => (p.depth ?? 0) + shapes[i].h));
   const yStep = niceStep(maxDepth / 4);
   const yMax = Math.ceil((maxDepth * 1.08) / yStep) * yStep;
   const sy = plotH / yMax;
@@ -127,6 +153,28 @@ export function ProfileChart({
       {/* 地表線 */}
       <line x1={padL} x2={right} y1={groundY} y2={groundY} style={{ stroke: ink.fg }} strokeWidth={1.5} />
 
+      {/* 規劃管線（管頂由起點埋深線性變化到終點）＋檢核淨距範圍（虛線） */}
+      {plan && (
+        <g>
+          <polygon
+            points={`${X(0)},${Y(plan.startDep)} ${X(L)},${Y(plan.endDep)} ${X(L)},${Y(plan.endDep + plan.dia)} ${X(0)},${Y(plan.startDep + plan.dia)}`}
+            fill={plan.color}
+            fillOpacity={0.35}
+            stroke={plan.color}
+            strokeWidth={1.2}
+          />
+          {plan.clearance > 0 && (
+            <polygon
+              points={`${X(0)},${Y(Math.max(0, plan.startDep - plan.clearance))} ${X(L)},${Y(Math.max(0, plan.endDep - plan.clearance))} ${X(L)},${Y(plan.endDep + plan.dia + plan.clearance)} ${X(0)},${Y(plan.startDep + plan.dia + plan.clearance)}`}
+              fill="none"
+              stroke={plan.color}
+              strokeWidth={0.8}
+              strokeDasharray="4 3"
+            />
+          )}
+        </g>
+      )}
+
       {/* 管線斷面＋標註 */}
       {result.pipes.map((p, i) => {
         const s = shapes[i];
@@ -137,6 +185,8 @@ export function ProfileChart({
         const cx = px[i];
         const cy = Y(top) + ph / 2;
         const on = hover === i;
+        const mark = marks?.[i];
+        const text = pipeLabel(p).slice(kindCode(p).length + 1);
         return (
           <g key={`${p.layer}-${p.gid}-${i}`} onMouseEnter={onHover && (() => onHover(i))} className="cursor-default">
             <polyline
@@ -151,6 +201,12 @@ export function ProfileChart({
             ) : (
               <circle cx={cx} cy={cy} r={pw / 2} fill={color} fillOpacity={0.85} />
             )}
+            {mark &&
+              (s.rect ? (
+                <rect x={cx - pw / 2 - 1.5} y={cy - ph / 2 - 1.5} width={pw + 3} height={ph + 3} fill="none" stroke={mark} strokeWidth={1.5} />
+              ) : (
+                <circle cx={cx} cy={cy} r={pw / 2 + 1.5} fill="none" stroke={mark} strokeWidth={1.5} />
+              ))}
             {on &&
               (s.rect ? (
                 <rect x={cx - pw / 2 - 2} y={cy - ph / 2 - 2} width={pw + 4} height={ph + 4} fill="none" style={{ stroke: ink.fg }} strokeWidth={1.5} />
@@ -163,7 +219,8 @@ export function ProfileChart({
               fontWeight={on ? 600 : undefined}
               style={{ fill: ink.fg }}
             >
-              <tspan style={{ fill: color }}>{kindCode(p)}</tspan> {pipeLabel(p).slice(kindCode(p).length + 1)}
+              {numbers && `${numbers[i]}. `}
+              <tspan style={{ fill: color }}>{kindCode(p)}</tspan> {text}
             </text>
             {/* 透明的較大感應區，小管線也好指（匯出時不需要） */}
             {onHover && (

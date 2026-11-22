@@ -15,6 +15,8 @@ const LAYER_VERTEX = 'clash-vertex';
 const LAYER_POINT = 'clash-point';
 const LAYER_HIGHLIGHT = 'clash-highlight';
 const LINE_COLOR = '#4dabf7';
+/** 規劃管線顏色（匯出剖面圖也用） */
+export const CLASH_PLAN_COLOR = LINE_COLOR;
 const TOO_LONG_COLOR = '#ff6b6b';
 const HALO_COLOR = '#10212d';
 const LABEL_CLASS =

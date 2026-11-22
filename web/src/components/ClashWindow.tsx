@@ -1,7 +1,8 @@
 // 管線衝突檢核視窗（浮動在 2D 圖台上方，可拖曳標題列移動）：
 // 輸入規劃管線的管徑、起終點管頂埋深與檢核淨距，對畫好的規劃管線查詢 /api/clash，
 // 列出疑似衝突（重疊／淨距不足／埋深缺值）；滑鼠指到一筆在地圖標示，點一下移過去。
-import { Loader2, PenLine, X } from 'lucide-react';
+// 「匯出」產生 Excel（摘要＋沿規劃管線剖面圖、衝突清單、規劃管線頂點）。
+import { Download, Loader2, PenLine, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -98,6 +99,8 @@ export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, on
   const [load, setLoad] = useState<Load>({ kind: 'idle' });
   const [hover, setHover] = useState<number | null>(null);
   const [drag, setDrag] = useState({ x: 0, y: 0 });
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const cb = useRef({ onPoints, onHover });
   cb.current = { onPoints, onHover };
   const set = (patch: Partial<ClashParams>) => setParams((p) => ({ ...p, ...patch }));
@@ -105,6 +108,7 @@ export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, on
   const layers = useMemo(() => PIPE_KINDS.filter((k) => enabledKinds.has(k.id)).map((k) => k.id), [enabledKinds]);
   useEffect(() => {
     setHover(null);
+    setExportError(null);
     if (!line || !layers.length) {
       setLoad({ kind: 'idle' });
       cb.current.onPoints([]);
@@ -170,8 +174,24 @@ export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, on
         .filter((x) => x.n)
     : [];
 
+  // 匯出 Excel（exceljs 約 1MB，動態載入）
+  const exportXlsx = async () => {
+    if (!result || !line) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { exportClashXlsx } = await import('./clashExport');
+      await exportClashXlsx(result, line, params, layers);
+    } catch (e) {
+      setExportError(`匯出失敗：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   let status: string;
-  if (drawing) status = '在 2D 圖台單擊加點，雙擊或 Enter 完成（Backspace 退一點、Esc 取消）；要輸入坐標請用命令列 CC';
+  if (exportError) status = exportError;
+  else if (drawing) status = '在 2D 圖台單擊加點，雙擊或 Enter 完成（Backspace 退一點、Esc 取消）；要輸入坐標請用命令列 CC';
   else if (!line) status = '按「重畫規劃管線」開始';
   else if (!layers.length) status = '沒有開啟的管線種類（選單「管線」）';
   else if (load.kind === 'loading') status = '檢核中…';
@@ -187,13 +207,23 @@ export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, on
     >
       <div className="border-border flex cursor-move items-center gap-2 border-b px-2 py-1 select-none" onPointerDown={startDrag}>
         <span className="font-semibold">衝突檢核</span>
-        <span className={cn('text-muted-foreground min-w-0 flex-1 truncate', load.kind === 'error' && 'text-destructive')}>
+        <span className={cn('text-muted-foreground min-w-0 flex-1 truncate', (load.kind === 'error' || exportError) && 'text-destructive')}>
           {load.kind === 'loading' && <Loader2 className="mr-1 inline size-3 animate-spin" />}
           {status}
         </span>
         <Button variant="ghost" size="xs" title="在 2D 圖台重新畫規劃管線" onClick={onRedraw} disabled={drawing}>
           <PenLine />
           重畫規劃管線
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          title="將衝突檢核結果匯出成 Excel（參數、統計、沿規劃管線剖面圖、衝突清單、頂點坐標）"
+          onClick={exportXlsx}
+          disabled={!result || !line || drawing || exporting}
+        >
+          {exporting ? <Loader2 className="animate-spin" /> : <Download />}
+          匯出
         </Button>
         <Button variant="ghost" size="icon-xs" title="關閉衝突檢核" aria-label="關閉衝突檢核" onClick={onClose}>
           <X />
