@@ -16,6 +16,7 @@ import {
   CLASH_DIA_RANGE,
   CLASH_SEVERITY,
   parseClashParams,
+  type Clash3dView,
   type ClashParams,
   type ClashPipe,
   type ClashResult,
@@ -36,7 +37,11 @@ interface Props {
   /** 滑鼠指到的衝突（索引同 onPoints） */
   onHover: (index: number | null) => void;
   /** 點清單中的一筆：地圖移到該處 */
-  onLocate: (at: LngLat) => void;
+  onLocate: (at: LngLat, index: number) => void;
+  /** 目前的規劃管線頂點（畫線中為已確定的頂點，給 3D 同步） */
+  vertices: LngLat[];
+  /** 交給 3D 圖台畫的內容（關閉視窗時 null） */
+  on3d: (view: Clash3dView | null) => void;
 }
 
 type Load =
@@ -94,20 +99,34 @@ function NumberField({
   );
 }
 
-export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, onPoints, onHover, onLocate }: Props) {
+export function ClashWindow({
+  line,
+  drawing,
+  enabledKinds,
+  onRedraw,
+  onClose,
+  onPoints,
+  onHover,
+  onLocate,
+  vertices,
+  on3d,
+}: Props) {
   const [params, setParams] = usePersistentState('utl.clashParams', parseClashParams);
   const [load, setLoad] = useState<Load>({ kind: 'idle' });
   const [hover, setHover] = useState<number | null>(null);
+  /** 點過的一筆（3D 醒目標示） */
+  const [selected, setSelected] = useState<number | null>(null);
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const cb = useRef({ onPoints, onHover });
-  cb.current = { onPoints, onHover };
+  const cb = useRef({ onPoints, onHover, on3d });
+  cb.current = { onPoints, onHover, on3d };
   const set = (patch: Partial<ClashParams>) => setParams((p) => ({ ...p, ...patch }));
 
   const layers = useMemo(() => PIPE_KINDS.filter((k) => enabledKinds.has(k.id)).map((k) => k.id), [enabledKinds]);
   useEffect(() => {
     setHover(null);
+    setSelected(null);
     setExportError(null);
     if (!line || !layers.length) {
       setLoad({ kind: 'idle' });
@@ -152,6 +171,19 @@ export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, on
   }, [line, layers, params]);
 
   useEffect(() => cb.current.onHover(hover), [hover]);
+
+  // ---- 3D 同步：規劃管線（畫線中逐點）、參數、衝突與選取的一筆；關閉視窗時清除
+  const clashes = load.kind === 'done' ? load.result.clashes : null;
+  useEffect(() => {
+    cb.current.on3d({
+      line: vertices,
+      complete: !drawing && line !== null,
+      params,
+      clashes: clashes ?? [],
+      selected,
+    });
+  }, [vertices, drawing, line, params, clashes, selected]);
+  useEffect(() => () => cb.current.on3d(null), []);
 
   // 拖曳標題列移動視窗
   const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -263,10 +295,14 @@ export function ClashWindow({ line, drawing, enabledKinds, onRedraw, onClose, on
                     className={cn(
                       'border-border cursor-pointer border-t [&>td]:px-2 [&>td]:py-0.5 [&>td]:whitespace-nowrap',
                       hover === i && 'bg-accent',
+                      selected === i && 'ring-primary ring-1 ring-inset',
                     )}
                     onMouseEnter={() => setHover(i)}
-                    onClick={() => onLocate([c.lng, c.lat])}
-                    title="點一下移到該處"
+                    onClick={() => {
+                      setSelected(i);
+                      onLocate([c.lng, c.lat], i);
+                    }}
+                    title="點一下移到該處（3D 斜看該處）"
                   >
                     <td>
                       <span className="inline-flex items-center gap-1">

@@ -79,3 +79,15 @@ export function parseClashParams(v: Record<string, unknown>): ClashParams {
 }
 
 export type ClashLine = LngLat[];
+
+/** 交給 3D 圖台畫的衝突檢核內容 */
+export interface Clash3dView {
+  /** 規劃管線頂點（畫線中為已確定的頂點；少於 2 點不畫管線） */
+  line: LngLat[];
+  /** 已畫完（畫完的線第一次出現時，3D 鏡頭對準整條線） */
+  complete: boolean;
+  params: ClashParams;
+  clashes: ClashPipe[];
+  /** 衝突清單中選取的一筆（3D 醒目標示） */
+  selected: number | null;
+}

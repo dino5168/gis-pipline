@@ -2,6 +2,8 @@
 // 這個模組只能用動態 import() 載入（Cesium 很大，不放進主 bundle）；
 // 載入前必須先設定 window.CESIUM_BASE_URL（見 CesiumView.tsx）。
 import {
+  ArcType,
+  BoundingSphere,
   BoxGeometry,
   CameraEventType,
   Cartesian2,
@@ -9,6 +11,7 @@ import {
   Cartographic,
   Color,
   ColorGeometryInstanceAttribute,
+  ColorMaterialProperty,
   CylinderGeometry,
   DirectionalLight,
   Entity,
@@ -29,6 +32,8 @@ import {
   Ray,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  SphereGeometry,
+  sampleTerrain,
   Transforms,
   UrlTemplateImageryProvider,
   VerticalOrigin,
@@ -53,7 +58,16 @@ import { PIPE_KINDS, type PipeColorMode, type PipeKindId } from '../../types/pip
 import type { HeightMode } from '../../types/pipe3d';
 import type { MeasurePoint3D } from '../../types/measure3d';
 import { MeasureTool3D, type MeasureTool3DOptions } from './measureTool3d';
-import { SEARCH_MARKER_COLOR } from '../../config';
+import {
+  CLASH_FOCUS_PITCH,
+  CLASH_FOCUS_RANGE,
+  CLASH_PLAN_COLOR,
+  CLASH_SELECT_COLOR,
+  CLASH_TERRAIN_STEP,
+  SEARCH_MARKER_COLOR,
+} from '../../config';
+import { CLASH_SEVERITY, type Clash3dView, type ClashPipe } from '../../types/clash';
+import type { LngLat } from '../../types/profile';
 import { uiCanvasFont } from '../../lib/theme';
 
 /** 管徑缺值時的預設（公尺） */
@@ -119,6 +133,23 @@ function closestOnSegmentToRay(ray: Ray, a: Cartesian3, b: Cartesian3): { point:
 const hasDepth = (d: number | null): d is number => d != null && d > 0;
 const clampDepth = (d: number) => Math.min(d, PIPE3D_MAX_DEPTH);
 const NO_DEPTH_COLOR = Color.fromCssColorString(PIPE3D_NO_DEPTH_COLOR);
+const CLASH_PLAN = Color.fromCssColorString(CLASH_PLAN_COLOR);
+/** 淨距範圍外管的透明度 */
+const CLASH_ENVELOPE_ALPHA = 0.22;
+const CLASH_SELECT = Color.fromCssColorString(CLASH_SELECT_COLOR);
+const CLASH_MARK_OUTLINE = Color.fromCssColorString('#10212d');
+
+/** 沿折線每隔 step 公尺插點（保留原頂點），供 Z 值模式取樣地形 */
+function densify(line: LngLat[], step: number): LngLat[] {
+  const out: LngLat[] = [line[0]];
+  for (let i = 1; i < line.length; i++) {
+    const [x0, y0] = line[i - 1], [x1, y1] = line[i];
+    const len = Cartesian3.distance(Cartesian3.fromDegrees(x0, y0), Cartesian3.fromDegrees(x1, y1));
+    const n = Math.max(1, Math.ceil(len / step));
+    for (let k = 1; k <= n; k++) out.push([x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n]);
+  }
+  return out;
+}
 /** 不允許地面下時，指北針旋轉的最低仰角（度）：鏡頭至少比環繞中心高這個角度 */
 const ORBIT_MIN_ELEVATION_DEG = 5;
 /** 按鈕（放大／縮小／重設／轉正北／俯視）平滑飛行的時間（ms） */
@@ -338,7 +369,10 @@ export class CesiumScene {
 
   private applyExaggeration() {
     this.viewer.scene.verticalExaggeration = this.terrain === 'none' ? 1 : this.terrainExaggeration;
-    if (this.options.heightMode === 'z') this.markAllDirty();
+    if (this.options.heightMode === 'z') {
+      this.markAllDirty();
+      if (this.clash) void this.renderClashPlan();
+    }
     this.notifyHeightSettings(false);
     this.requestRender();
   }
@@ -725,6 +759,246 @@ export class CesiumScene {
     return Cartesian3.fromDegrees(p.lng, p.lat, p.h * scale);
   }
 
+  // ---------------- 衝突檢核：規劃管線、淨距範圍、衝突標示
+
+  private clash: Clash3dView | null = null;
+  /** 規劃管線與淨距外管的 Primitive */
+  private clashPrims: Primitive[] = [];
+  /** 地面上的路線（實體） */
+  private clashRoute: Entity | null = null;
+  /** 衝突點與選取管線的標示（實體） */
+  private clashMarks: Entity[] = [];
+  /** 規劃管線中心線（場景坐標）與各點距起點的水平距離（公尺），供衝突點定高度 */
+  private clashAxis: { pos: Cartesian3[]; acc: number[] } | null = null;
+  /** 地形取樣是非同步的：較晚的呼叫取代較早的 */
+  private clashToken = 0;
+  /** 已對準過的規劃管線（同一條線只自動對準一次） */
+  private clashFitted: LngLat[] | null = null;
+
+  /** 設定衝突檢核內容（null 清除） */
+  setClash(view: Clash3dView | null) {
+    const prev = this.clash;
+    this.clash = view;
+    // 只有衝突清單或選取改變時不必重建管線
+    if (prev && view && prev.line === view.line && prev.params === view.params && prev.complete === view.complete) {
+      this.renderClashMarks();
+      return;
+    }
+    void this.renderClashPlan();
+  }
+
+  private clearClashPlan() {
+    const { scene } = this.viewer;
+    for (const p of this.clashPrims) if (!p.isDestroyed()) scene.primitives.remove(p);
+    this.clashPrims = [];
+    if (this.clashRoute) this.viewer.entities.remove(this.clashRoute);
+    this.clashRoute = null;
+    this.clashAxis = null;
+  }
+
+  /**
+   * 畫規劃管線：管頂埋深由起點內插到終點（依水平距離比例）。
+   * 埋深模式地表 = 0；Z 值模式（有地形）沿線每 CLASH_TERRAIN_STEP 公尺取樣地形，管頂 = 地形高度 − 埋深。
+   * 高度倍率與既有管線相同（Z 值模式用地形倍率、埋深模式用管線倍率），管徑與淨距用管線倍率。
+   */
+  private async renderClashPlan() {
+    const token = ++this.clashToken;
+    const view = this.clash;
+    if (!view || view.line.length < 2) {
+      this.clearClashPlan();
+      if (!view) this.clashFitted = null;
+      this.renderClashMarks();
+      return;
+    }
+    const { params } = view;
+    const useTerrain = this.options.heightMode === 'z' && this.terrain !== 'none';
+    const pts = useTerrain ? densify(view.line, CLASH_TERRAIN_STEP) : view.line;
+    let ground: number[] | null = null;
+    if (useTerrain) {
+      ground = await this.sampleGround(pts);
+      if (token !== this.clashToken || this.viewer.isDestroyed()) return;
+    }
+
+    const flat = pts.map(([lng, lat]) => Cartesian3.fromDegrees(lng, lat, 0));
+    const acc = [0];
+    for (let j = 1; j < flat.length; j++) acc.push(acc[j - 1] + Cartesian3.distance(flat[j - 1], flat[j]));
+    const total = acc[acc.length - 1] || 1;
+    const r = params.diaMm / 2000;
+    const k = this.options.exaggeration;
+    const vk = this.pipeHeightScale;
+    const pos = pts.map(([lng, lat], j) => {
+      const d = params.startDep + (params.endDep - params.startDep) * (acc[j] / total);
+      const center = (ground ? ground[j] : 0) - d - r;
+      return Cartesian3.fromDegrees(lng, lat, center * vk);
+    });
+
+    const plan: GeometryInstance[] = [];
+    const envelope: GeometryInstance[] = [];
+    const planColor = ColorGeometryInstanceAttribute.fromColor(CLASH_PLAN);
+    const envColor = ColorGeometryInstanceAttribute.fromColor(CLASH_PLAN.withAlpha(CLASH_ENVELOPE_ALPHA));
+    const cylinder = (len: number, radius: number) =>
+      new CylinderGeometry({
+        length: len,
+        topRadius: radius,
+        bottomRadius: radius,
+        slices: 24,
+        vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
+      });
+    for (let j = 0; j < pos.length - 1; j++) {
+      const dir = Cartesian3.subtract(pos[j + 1], pos[j], new Cartesian3());
+      const len = Cartesian3.magnitude(dir);
+      if (len < 1e-3) continue;
+      Cartesian3.divideByScalar(dir, len, dir);
+      const mid = Cartesian3.midpoint(pos[j], pos[j + 1], new Cartesian3());
+      const modelMatrix = Matrix4.fromRotationTranslation(segmentFrame(mid, dir), mid);
+      plan.push(new GeometryInstance({ geometry: cylinder(len, r * k), modelMatrix, attributes: { color: planColor } }));
+      if (params.clearance > 0) {
+        envelope.push(
+          new GeometryInstance({
+            geometry: cylinder(len, (r + params.clearance) * k),
+            modelMatrix,
+            attributes: { color: envColor },
+          }),
+        );
+      }
+    }
+    // 轉折處補球，管段之間不留缺口
+    for (const p of pos) {
+      plan.push(
+        new GeometryInstance({
+          geometry: new SphereGeometry({ radius: r * k, vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT }),
+          modelMatrix: Matrix4.fromTranslation(p),
+          attributes: { color: planColor },
+        }),
+      );
+    }
+
+    this.clearClashPlan();
+    const { scene } = this.viewer;
+    const add = (instances: GeometryInstance[], translucent: boolean) => {
+      if (!instances.length) return;
+      const prim = new Primitive({
+        geometryInstances: instances,
+        appearance: new PerInstanceColorAppearance({ translucent, closed: true }),
+        asynchronous: false,
+      });
+      scene.primitives.add(prim);
+      this.clashPrims.push(prim);
+    };
+    add(plan, false);
+    add(envelope, true);
+    // 地面上的路線：地面不透明時也看得到規劃管線經過哪裡
+    this.clashRoute = this.viewer.entities.add({
+      polyline: {
+        positions: view.line.map(([lng, lat]) => Cartesian3.fromDegrees(lng, lat, 0)),
+        width: 3,
+        material: CLASH_PLAN.withAlpha(0.9),
+        clampToGround: true,
+      },
+    });
+    this.clashAxis = { pos, acc };
+    this.renderClashMarks();
+
+    // 畫完的線第一次出現：鏡頭斜看整條規劃管線
+    if (view.complete && this.clashFitted !== view.line) {
+      this.clashFitted = view.line;
+      const bs = BoundingSphere.fromPoints([...pos, ...flat]);
+      const range = Math.max((bs.radius / Math.sin(this.fovy / 2)) * 1.15, CLASH_FOCUS_RANGE);
+      this.flyAround(bs.center, this.viewer.camera.heading, -CesiumMath.PI_OVER_FOUR, range);
+    }
+  }
+
+  /** 沿線地形高度（公尺，未放大）；取不到的點當 0 */
+  private async sampleGround(pts: LngLat[]): Promise<number[]> {
+    const cartos = pts.map(([lng, lat]) => Cartographic.fromDegrees(lng, lat));
+    const level = TERRAINS[this.terrain].source?.maxzoom ?? 15;
+    try {
+      await sampleTerrain(this.viewer.terrainProvider, level, cartos);
+    } catch (e) {
+      console.warn('[衝突檢核] 地形取樣失敗', e);
+    }
+    return cartos.map((c) => (Number.isFinite(c.height) ? c.height : 0));
+  }
+
+  /** 規劃管線中心線上距起點 dist 公尺處（場景坐標） */
+  private clashAxisAt(dist: number): Cartesian3 | null {
+    const a = this.clashAxis;
+    if (!a) return null;
+    let j = 1;
+    while (j < a.acc.length - 1 && a.acc[j] < dist) j++;
+    const seg = a.acc[j] - a.acc[j - 1];
+    const t = seg > 0 ? Math.min(Math.max((dist - a.acc[j - 1]) / seg, 0), 1) : 0;
+    return Cartesian3.lerp(a.pos[j - 1], a.pos[j], t, new Cartesian3());
+  }
+
+  /**
+   * 衝突點在畫面上的位置：既有管線已載入 3D 時取它中心線上最接近的點；
+   * 否則以規劃管線在該處的高度，放在 API 給的平面位置。
+   */
+  private clashMarkPosition(c: ClashPipe): Cartesian3 {
+    const ref = this.clashAxisAt(c.dist);
+    const h = ref ? Cartographic.fromCartesian(ref).height : 0;
+    const p = Cartesian3.fromDegrees(c.lng, c.lat, h);
+    const axis = this.pipeAxes.get(c.layer)?.get(c.gid);
+    if (!axis || axis.pts.length < 2) return p;
+    let best = Infinity;
+    let hit = p;
+    const tmp = new Cartesian3();
+    for (let j = 0; j < axis.pts.length - 1; j++) {
+      closestOnSegment(p, axis.pts[j], axis.pts[j + 1], tmp);
+      const d = Cartesian3.distance(tmp, p);
+      if (d < best) {
+        best = d;
+        hit = Cartesian3.clone(tmp);
+      }
+    }
+    return hit;
+  }
+
+  /** 衝突點（狀態色，不被地面遮住）＋選取那筆的既有管線醒目標示 */
+  private renderClashMarks() {
+    for (const e of this.clashMarks) this.viewer.entities.remove(e);
+    this.clashMarks = [];
+    const view = this.clash;
+    if (view && view.line.length >= 2) {
+      view.clashes.forEach((c, i) => {
+        const sel = i === view.selected;
+        this.clashMarks.push(
+          this.viewer.entities.add({
+            position: this.clashMarkPosition(c),
+            point: {
+              pixelSize: sel ? 16 : 10,
+              color: Color.fromCssColorString(CLASH_SEVERITY[c.severity].color),
+              outlineColor: sel ? Color.WHITE : CLASH_MARK_OUTLINE,
+              outlineWidth: sel ? 3 : 1.5,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          }),
+        );
+      });
+      const c = view.selected !== null ? view.clashes[view.selected] : undefined;
+      const axis = c && this.pipeAxes.get(c.layer)?.get(c.gid);
+      if (axis && axis.pts.length >= 2) {
+        const material = new ColorMaterialProperty(CLASH_SELECT.withAlpha(0.85));
+        this.clashMarks.push(
+          this.viewer.entities.add({
+            polyline: { positions: axis.pts, width: 6, arcType: ArcType.NONE, material, depthFailMaterial: material },
+          }),
+        );
+      }
+    }
+    this.requestRender();
+  }
+
+  /** 鏡頭斜看衝突清單中的第 i 筆 */
+  focusClash(i: number) {
+    const c = this.clash?.clashes[i];
+    if (!c) return;
+    const target = this.clashMarkPosition(c);
+    const range = CLASH_FOCUS_RANGE * Math.max(1, this.options.exaggeration / 2);
+    this.flyAround(target, this.viewer.camera.heading, -CesiumMath.toRadians(CLASH_FOCUS_PITCH), range);
+  }
+
   // ---------------- 3D 管線
 
   setPipes(kind: PipeKindId, pipes: Pipe3D[]) {
@@ -747,6 +1021,9 @@ export class CesiumScene {
     const prev = this.options;
     this.options = options;
     this.markAllDirty();
+    if (this.clash && (prev.heightMode !== options.heightMode || prev.exaggeration !== options.exaggeration)) {
+      void this.renderClashPlan();
+    }
     if (prev.heightMode !== options.heightMode || prev.exaggeration !== options.exaggeration) {
       this.notifyHeightSettings(prev.heightMode !== options.heightMode);
     }
@@ -820,6 +1097,8 @@ export class CesiumScene {
           })
         : null;
     this.swapPrimitive(kind, next);
+    // 管線中心線換了：衝突點改貼到新的位置
+    if (this.clash?.clashes.length) this.renderClashMarks();
   }
 
   /**

@@ -5,7 +5,7 @@ import * as maplibregl from 'maplibre-gl';
 import type { GeoJSONSource } from 'maplibre-gl';
 import type { Feature } from 'geojson';
 import { formatDistance, segmentLengths } from './measure';
-import { CLASH_MAX_LENGTH, CLASH_MAX_POINTS } from '../config';
+import { CLASH_MAX_LENGTH, CLASH_MAX_POINTS, CLASH_PLAN_COLOR } from '../config';
 import type { LngLat } from '../types/profile';
 
 const SOURCE_ID = 'clash';
@@ -14,9 +14,7 @@ const LAYER_LINE = 'clash-line';
 const LAYER_VERTEX = 'clash-vertex';
 const LAYER_POINT = 'clash-point';
 const LAYER_HIGHLIGHT = 'clash-highlight';
-const LINE_COLOR = '#4dabf7';
-/** 規劃管線顏色（匯出剖面圖也用） */
-export const CLASH_PLAN_COLOR = LINE_COLOR;
+const LINE_COLOR = CLASH_PLAN_COLOR;
 const TOO_LONG_COLOR = '#ff6b6b';
 const HALO_COLOR = '#10212d';
 const LABEL_CLASS =
@@ -33,6 +31,8 @@ interface Options {
   onComplete: (line: LngLat[]) => void;
   /** 畫線途中按 Esc */
   onCancel: () => void;
+  /** 畫線中已確定的頂點改變（加點、退點、清除；給 3D 同步） */
+  onVertices?: (pts: LngLat[]) => void;
 }
 
 export class ClashTool {
@@ -75,6 +75,7 @@ export class ClashTool {
     if (!this.drawing) return;
     this.drawing = false;
     this.pts = [];
+    this.opts.onVertices?.([]);
     this.cursor = null;
     this.map.off('click', this.handleClick);
     this.map.off('dblclick', this.handleDblClick);
@@ -138,6 +139,7 @@ export class ClashTool {
     }
     this.pts.push(p);
     this.cursor = p;
+    this.opts.onVertices?.([...this.pts]);
     if (this.pts.length >= CLASH_MAX_POINTS) this.finish();
     else this.render();
   };
@@ -164,6 +166,7 @@ export class ClashTool {
     } else if (e.key === 'Backspace' && this.pts.length) {
       e.preventDefault();
       this.pts.pop();
+      this.opts.onVertices?.([...this.pts]);
       this.render();
     }
   };

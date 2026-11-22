@@ -5,8 +5,7 @@
 // 本檔由 ClashWindow 動態 import（含 exceljs、react-dom/server），不進主 bundle。
 import { Workbook, type Worksheet } from 'exceljs';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { PIPE3D_NO_DEPTH_COLOR } from '../config';
-import { CLASH_PLAN_COLOR } from '../map/clashTool';
+import { CLASH_PLAN_COLOR, PIPE3D_NO_DEPTH_COLOR } from '../config';
 import { lngLatToTwd97 } from '../map/coordTransform';
 import { CLASH_SEVERITY, type ClashParams, type ClashPipe, type ClashResult, type ClashSeverity } from '../types/clash';
 import { PIPE_KINDS, PIPE_KIND_BY_ID, type PipeKindId } from '../types/pipeKind';

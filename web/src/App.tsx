@@ -33,6 +33,7 @@ import { AddressSearch } from './components/AddressSearch';
 import { TitleTooltip } from './components/TitleTooltip';
 import { flyToSearchResult, setSearchMarker } from './map/searchMarker';
 import type { GeocodeResult } from './types/geocode';
+import type { Clash3dView } from './types/clash';
 
 // 版面偏好（只存在這台瀏覽器；讀寫失敗時用預設值）
 const LAYOUT_STORE_KEY = 'utl.layout';
@@ -94,9 +95,11 @@ export default function App() {
     setProfileOpen(true);
   };
   // 分析 → 衝突檢核（不記住；與剖面分析同時只開一個，都在 2D 圖台畫線）
+  // 一律切到 2D＋3D 並排：左邊畫規劃管線，右邊同步看 3D
   const [clashOpen, setClashOpen] = useState(false);
+  const [clash3d, setClash3d] = useState<Clash3dView | null>(null);
   const openClash = () => {
-    if (mode === '3d') setMode('split');
+    if (mode !== 'split') setMode('split');
     setProfileOpen(false);
     setClashOpen(true);
   };
@@ -133,6 +136,8 @@ export default function App() {
     if (!flyingRef.current) activeRef.current = pane;
   }, []);
   useViewSync(mapRef, scene, activeRef);
+  useEffect(() => scene?.setClash(clash3d), [scene, clash3d]);
+  const focusClash3d = useCallback((i: number) => scene?.focusClash(i), [scene]);
 
   useEffect(() => writeStored(LAYOUT_STORE_KEY, { mode, ratio: splitRatio }), [mode, splitRatio]);
 
@@ -276,6 +281,8 @@ export default function App() {
               clashOpen={clashOpen}
               onClashOpen={openClash}
               onClashClose={() => setClashOpen(false)}
+              onClash3d={setClash3d}
+              onClash3dFocus={focusClash3d}
               mapRef={mapRef}
               onZoomChange={setZoom}
               onTileError={setTileError}

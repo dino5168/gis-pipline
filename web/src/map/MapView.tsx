@@ -47,6 +47,7 @@ import { ProfileWindow } from '../components/ProfileWindow';
 import { ClashTool } from './clashTool';
 import { ClashWindow } from '../components/ClashWindow';
 import type { LngLat } from '../types/profile';
+import type { Clash3dView } from '../types/clash';
 import {
   PIPE_KINDS,
   PIPE_KIND_BY_ID,
@@ -89,6 +90,10 @@ interface Props {
   /** 開啟衝突檢核視窗（命令列 CLASH 用） */
   onClashOpen: () => void;
   onClashClose: () => void;
+  /** 衝突檢核要在 3D 畫的內容（null＝清除） */
+  onClash3d: (view: Clash3dView | null) => void;
+  /** 衝突清單點一筆、2D 移過去後：3D 鏡頭飛到該衝突 */
+  onClash3dFocus: (index: number) => void;
   /** 讓上層取得地圖實體（例如 flyTo） */
   mapRef: RefObject<maplibregl.Map | null>;
   onZoomChange: (zoom: number) => void;
@@ -192,6 +197,8 @@ export function MapView({
   clashOpen,
   onClashOpen,
   onClashClose,
+  onClash3d,
+  onClash3dFocus,
   mapRef,
   onZoomChange,
   onTileError,
@@ -262,6 +269,8 @@ export function MapView({
   const clashRef = useRef<ClashTool | null>(null);
   const [clashLine, setClashLine] = useState<LngLat[] | null>(null);
   const [clashDrawing, setClashDrawing] = useState(false);
+  /** 畫線中已確定的頂點（給 3D 同步） */
+  const [clashDraft, setClashDraft] = useState<LngLat[]>([]);
   const stopClashDrawing = () => {
     clashRef.current?.stopDrawing();
     setClashDrawing(false);
@@ -401,6 +410,7 @@ export function MapView({
         setClashDrawing(false);
       },
       onCancel: () => setClashDrawing(false),
+      onVertices: setClashDraft,
     });
     clashRef.current = clash;
     /** 量測、繪圖、命令執行或畫剖面線中：暫停管線滑過／點選 */
@@ -695,11 +705,16 @@ export function MapView({
           enabledKinds={enabledKinds}
           onRedraw={startClashDrawing}
           onClose={onClashClose}
+          vertices={clashDrawing ? clashDraft : (clashLine ?? [])}
           onPoints={(pts) => clashRef.current?.setPoints(pts)}
           onHover={(i) => clashRef.current?.setHighlight(i)}
-          onLocate={(at) => {
+          on3d={onClash3d}
+          onLocate={(at, index) => {
             const map = mapRef.current;
-            if (map) map.easeTo({ center: at, zoom: Math.max(map.getZoom(), 19) });
+            if (!map) return;
+            // 2D 先移過去（3D 依同步跟著移），停下後 3D 再斜看該衝突
+            map.once('moveend', () => onClash3dFocus(index));
+            map.easeTo({ center: at, zoom: Math.max(map.getZoom(), 19) });
           }}
         />
       )}

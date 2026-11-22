@@ -35,6 +35,15 @@ export const PROFILE_MAX_LENGTH = 1000;
 export const CLASH_MAX_LENGTH = 2000;
 /** 衝突檢核：規劃管線頂點上限（與 API CLASH_MAX_POINTS 一致） */
 export const CLASH_MAX_POINTS = 200;
+/** 衝突檢核：規劃管線顏色（2D、3D、匯出剖面圖共用） */
+export const CLASH_PLAN_COLOR = '#4dabf7';
+/** 衝突檢核 3D：Z 值模式沿規劃管線取樣地形的間距（公尺） */
+export const CLASH_TERRAIN_STEP = 10;
+/** 衝突檢核 3D：點清單一筆時，鏡頭與衝突點的距離（公尺，管線倍率 ×2 時；隨倍率等比放大）與俯角（度） */
+export const CLASH_FOCUS_RANGE = 30;
+export const CLASH_FOCUS_PITCH = 35;
+/** 衝突檢核 3D：選取的既有管線醒目標示顏色 */
+export const CLASH_SELECT_COLOR = '#cc5de8';
 
 /** Cesium 靜態檔（Workers、Assets…）的位址，由 vite.config.ts 複製到建置輸出的 cesium/ */
 export const CESIUM_BASE_URL = `${import.meta.env.BASE_URL}cesium/`;
